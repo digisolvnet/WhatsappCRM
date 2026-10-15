@@ -1,0 +1,202 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { MOCK_SUBSCRIBERS, MOCK_PLATFORM_SETTINGS } from "@/lib/mock/data";
+import { sendTextMessage } from "@/lib/whatsapp/meta-api";
+import { decrypt } from "@/lib/whatsapp/encryption";
+
+export const maxDuration = 60;
+
+export async function GET(request: Request) {
+  return handleCronReminders(request);
+}
+
+export async function POST(request: Request) {
+  return handleCronReminders(request);
+}
+
+async function handleCronReminders(request: Request) {
+  try {
+    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const now = new Date();
+    const results: Array<{
+      accountId: string;
+      accountName: string;
+      daysRemaining: number;
+      action: string;
+      phone?: string;
+      status: string;
+    }> = [];
+
+    if (isDemo) {
+      // Process mock subscribers for demo
+      for (const sub of MOCK_SUBSCRIBERS) {
+        if (!sub.auto_reminder_enabled) continue;
+
+        const expiry = new Date(sub.current_period_ends_at);
+        const diffMs = expiry.getTime() - now.getTime();
+        const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        // Skip if already sent reminder in the last 24 hours
+        if (sub.last_reminder_sent_at) {
+          const lastSent = new Date(sub.last_reminder_sent_at);
+          if (now.getTime() - lastSent.getTime() < 24 * 3600 * 1000) {
+            continue;
+          }
+        }
+
+        if (daysRemaining <= 3 && daysRemaining >= 0) {
+          sub.last_reminder_sent_at = now.toISOString();
+          sub.reminder_count = (sub.reminder_count || 0) + 1;
+          results.push({
+            accountId: sub.id,
+            accountName: sub.name,
+            daysRemaining,
+            action: `Sent ${daysRemaining}-day payment reminder`,
+            phone: sub.billing_phone,
+            status: "sent_demo",
+          });
+        } else if (daysRemaining < 0 && sub.subscription_status !== "suspended") {
+          sub.subscription_status = "past_due";
+          sub.last_reminder_sent_at = now.toISOString();
+          sub.reminder_count = (sub.reminder_count || 0) + 1;
+          results.push({
+            accountId: sub.id,
+            accountName: sub.name,
+            daysRemaining,
+            action: "Marked past_due and sent expiry alert",
+            phone: sub.billing_phone,
+            status: "past_due_demo",
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        mode: "demo",
+        timestamp: now.toISOString(),
+        totalProcessed: results.length,
+        reminders: results,
+      });
+    }
+
+    // Production logic with Supabase
+    const supabase = await createClient();
+
+    // 1. Fetch platform settings
+    const { data: settings } = await supabase
+      .from("platform_billing_settings")
+      .select("*")
+      .eq("id", "default")
+      .single();
+
+    const template = settings?.reminder_message_template || MOCK_PLATFORM_SETTINGS.reminder_message_template;
+    const defaultPayLink = settings?.default_payment_link || "";
+
+    // 2. Fetch connected Super Admin WhatsApp config
+    const { data: whatsappConfigs } = await supabase
+      .from("whatsapp_config")
+      .select("*")
+      .eq("status", "connected")
+      .limit(1);
+
+    const senderConfig = whatsappConfigs?.[0] || null;
+
+    // 3. Fetch accounts needing reminders
+    const { data: accounts, error: accError } = await supabase
+      .from("accounts")
+      .select("*, profiles!profiles_account_id_fkey(full_name, email, role)")
+      .in("subscription_status", ["active", "trial", "past_due"])
+      .eq("auto_reminder_enabled", true);
+
+    if (accError) {
+      return NextResponse.json({ error: accError.message }, { status: 500 });
+    }
+
+    for (const acc of accounts || []) {
+      const expiry = new Date(acc.current_period_ends_at);
+      const diffMs = expiry.getTime() - now.getTime();
+      const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+      // Skip if reminded within last 24 hours
+      if (acc.last_reminder_sent_at) {
+        const lastSent = new Date(acc.last_reminder_sent_at);
+        if (now.getTime() - lastSent.getTime() < 24 * 3600 * 1000) {
+          continue;
+        }
+      }
+
+      // Check if due within 3 days or expired
+      const shouldRemind = daysRemaining <= 3;
+      if (!shouldRemind) continue;
+
+      const owner = Array.isArray(acc.profiles)
+        ? acc.profiles.find((p: any) => p.role === "owner") || acc.profiles[0]
+        : null;
+
+      const recipientPhone = (acc.billing_phone || "").replace(/[^\d+]/g, "");
+      const payLink = acc.payment_link || defaultPayLink;
+      const dueDateStr = expiry.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      const messageText = template
+        .replace(/{{name}}/g, owner?.full_name || "Customer")
+        .replace(/{{account_name}}/g, acc.name)
+        .replace(/{{due_date}}/g, dueDateStr)
+        .replace(/{{amount}}/g, `${acc.currency || "USD"} ${acc.monthly_price || 49}`)
+        .replace(/{{payment_link}}/g, payLink);
+
+      let sendStatus = "skipped_no_phone";
+
+      if (recipientPhone && senderConfig) {
+        try {
+          const token = decrypt(senderConfig.access_token);
+          await sendTextMessage({
+            phoneNumberId: senderConfig.phone_number_id,
+            accessToken: token,
+            to: recipientPhone,
+            text: messageText,
+          });
+          sendStatus = "delivered";
+        } catch (err: any) {
+          sendStatus = `failed: ${err.message}`;
+        }
+      }
+
+      // If expired beyond 2 days grace period, mark past_due
+      let newStatus = acc.subscription_status;
+      if (daysRemaining < 0 && acc.subscription_status === "active") {
+        newStatus = "past_due";
+      }
+
+      await supabase
+        .from("accounts")
+        .update({
+          subscription_status: newStatus,
+          last_reminder_sent_at: now.toISOString(),
+          reminder_count: (acc.reminder_count || 0) + 1,
+        })
+        .eq("id", acc.id);
+
+      results.push({
+        accountId: acc.id,
+        accountName: acc.name,
+        daysRemaining,
+        action: daysRemaining >= 0 ? `Sent reminder (${daysRemaining}d left)` : "Sent past-due notice",
+        phone: recipientPhone,
+        status: sendStatus,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      timestamp: now.toISOString(),
+      totalProcessed: results.length,
+      reminders: results,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || "Cron job failed" }, { status: 500 });
+  }
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createMockClient } from '@/lib/mock/client'
 import {
   getSubscribedApps,
   listWabaPhoneNumbers,
@@ -53,6 +54,9 @@ async function resolveAccountId(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _adminClient: any = null
 function supabaseAdmin() {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') {
+    return createMockClient()
+  }
   if (!_adminClient) {
     _adminClient = createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,

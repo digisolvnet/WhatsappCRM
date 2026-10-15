@@ -161,6 +161,24 @@ function LoginPageInner() {
             >
               {loading ? t('signingIn') : t('signIn')}
             </Button>
+
+            <div className="relative my-2 text-center text-xs after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+              <span className="relative z-10 bg-card px-2 text-muted-foreground">
+                or
+              </span>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                document.cookie = "wacrm_demo=true; path=/; max-age=86400";
+                window.location.href = "/dashboard";
+              }}
+              className="h-10 w-full border-border bg-muted/60 text-foreground hover:bg-muted font-medium"
+            >
+              🚀 Explore Local Demo Mode
+            </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">

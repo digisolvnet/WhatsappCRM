@@ -1,8 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { createMockClient } from '@/lib/mock/client'
 
 export async function createClient() {
   const cookieStore = await cookies()
+  const isDemo = cookieStore.get('wacrm_demo')?.value === 'true' || process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+
+  if (isDemo) {
+    return createMockClient()
+  }
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

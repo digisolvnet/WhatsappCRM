@@ -18,6 +18,7 @@ import {
   Radio,
   Settings,
   Shield,
+  ShieldCheck,
   User,
   UserCog,
   Users,
@@ -116,7 +117,7 @@ import { useTranslations } from "next-intl";
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
@@ -290,6 +291,26 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 </li>
               );
             })}
+
+            {isSuperAdmin && (
+              <li key="/admin">
+                <Link
+                  href="/admin"
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2 mt-1",
+                    pathname.startsWith("/admin")
+                      ? "bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/20"
+                      : "text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300",
+                  )}
+                >
+                  <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <span className="flex-1">Admin CRM</span>
+                  <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300 border border-emerald-500/30">
+                    SaaS
+                  </span>
+                </Link>
+              </li>
+            )}
           </ul>
         </nav>
 

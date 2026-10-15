@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isDemoMode } from '@/lib/mock/client'
 import {
   daysAgoStart,
   DOW_SHORT_MON_FIRST,
@@ -30,6 +31,16 @@ type DB = SupabaseClient
 // --- 1. Metric cards ---------------------------------------------------
 
 export async function loadMetrics(db: DB): Promise<MetricsBundle> {
+  if (isDemoMode()) {
+    return {
+      activeConversations: { current: 3, previous: 1 },
+      newContactsToday: { current: 3, previous: 2 },
+      openDealsValue: 17300,
+      openDealsCount: 2,
+      messagesSentToday: { current: 8, previous: 5 },
+    }
+  }
+
   const todayStart = startOfLocalDay().toISOString()
   const yesterdayStart = daysAgoStart(1).toISOString()
 
@@ -105,6 +116,15 @@ export async function loadConversationsSeries(
   db: DB,
   rangeDays: number,
 ): Promise<ConversationsSeriesPoint[]> {
+  const keys = lastNDayKeys(rangeDays)
+  if (isDemoMode()) {
+    return keys.map((day, idx) => ({
+      day,
+      incoming: Math.floor(Math.sin(idx) * 3 + 4),
+      outgoing: Math.floor(Math.cos(idx) * 2 + 5),
+    }))
+  }
+
   const start = daysAgoStart(rangeDays - 1).toISOString()
   const { data, error } = await db
     .from('messages')
@@ -113,7 +133,6 @@ export async function loadConversationsSeries(
     .order('created_at', { ascending: true })
   if (error) throw error
 
-  const keys = lastNDayKeys(rangeDays)
   const buckets = new Map<string, { incoming: number; outgoing: number }>()
   for (const k of keys) buckets.set(k, { incoming: 0, outgoing: 0 })
 
@@ -131,6 +150,17 @@ export async function loadConversationsSeries(
 // --- 3. Pipeline donut -------------------------------------------------
 
 export async function loadPipelineDonut(db: DB): Promise<PipelineDonutData> {
+  if (isDemoMode()) {
+    return {
+      stages: [
+        { id: 'stage-1', name: 'New Lead', color: '#3b82f6', dealCount: 2, totalValue: 4500 },
+        { id: 'stage-2', name: 'Qualified', color: '#eab308', dealCount: 1, totalValue: 4800 },
+        { id: 'stage-3', name: 'Proposal Sent', color: '#f97316', dealCount: 1, totalValue: 12500 },
+      ],
+      totalValue: 21800,
+    }
+  }
+
   const [stagesRes, dealsRes] = await Promise.all([
     db.from('pipeline_stages').select('id, name, color, pipeline_id, position').order('position'),
     db.from('deals').select('stage_id, value, status').eq('status', 'open'),
@@ -170,6 +200,18 @@ export async function loadPipelineDonut(db: DB): Promise<PipelineDonutData> {
 // --- 4. Response time by day of week ----------------------------------
 
 export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
+  if (isDemoMode()) {
+    return {
+      buckets: Array.from({ length: 7 }, (_, dow) => ({
+        dow,
+        avgMinutes: 12 + (dow % 3) * 4,
+        samples: 5 + (dow % 4),
+      })),
+      thisWeekAvg: 14.5,
+      lastWeekAvg: 18.2,
+    }
+  }
+
   // Pull the last 14 days of messages in one shot, then walk per
   // conversation to find each "first inbound" → "first subsequent
   // outbound" pair. 14 days gives us both "this week" + "last week"
@@ -266,6 +308,33 @@ export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
 // --- 5. Activity feed --------------------------------------------------
 
 export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> {
+  if (isDemoMode()) {
+    return [
+      {
+        id: 'msg-demo-1',
+        kind: 'message',
+        title: 'New customer message from Alex Johnson',
+        timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        details: 'Sounds great! Could you send over the custom quote for 25 seats?',
+        conversationId: 'conv-1',
+      },
+      {
+        id: 'deal-demo-1',
+        kind: 'deal',
+        title: 'Deal moved to Proposal Sent',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+        details: 'TechCorp 25-Seat Enterprise Contract ($12,500)',
+      },
+      {
+        id: 'contact-demo-1',
+        kind: 'contact',
+        title: 'New contact added: Sarah Miller',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+        details: '+14155558923 (Apex Ventures)',
+      },
+    ]
+  }
+
   // Pull ~10 from each source (plenty of headroom after merge-sort),
   // then interleave by timestamp. The individual per-table limits
   // keep the payload small; the final limit is enforced after sort.

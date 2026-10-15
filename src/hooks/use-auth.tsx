@@ -20,6 +20,7 @@ import {
   isAccountRole,
   type AccountRole,
 } from "@/lib/auth/roles";
+import { MOCK_USER, MOCK_PROFILE, MOCK_ACCOUNT } from "@/lib/mock/data";
 
 interface Profile {
   id: string;
@@ -35,6 +36,7 @@ interface Profile {
   beta_features: string[];
   account_id: string | null;
   account_role: AccountRole | null;
+  is_super_admin?: boolean;
 }
 
 interface AccountSummary {
@@ -130,6 +132,8 @@ interface AuthContextValue {
   canEditSettings: boolean;
   /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
+  /** True if the user is a platform Super Admin who manages client subscriptions. */
+  isSuperAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -318,6 +322,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 3000);
 
     const init = async () => {
+      // Check for Demo Mode bypass
+      const isDemo =
+        typeof document !== "undefined" &&
+        (document.cookie.includes("wacrm_demo=true") ||
+          process.env.NEXT_PUBLIC_DEMO_MODE === "true");
+
+      if (isDemo) {
+        if (!mounted) return;
+        setUser(MOCK_USER as any);
+        setProfile(MOCK_PROFILE as any);
+        setAccount(MOCK_ACCOUNT as any);
+        setLoading(false);
+        setProfileLoading(false);
+        return;
+      }
+
       try {
         const {
           data: { session },
@@ -331,15 +351,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(currentUser);
 
         if (currentUser) {
-          // Don't block session loading on profile fetch — chrome
-          // (header, sidebar) can render from the user object alone,
-          // profile enriches async. Callers that need to branch on
-          // profile data gate on `profileLoading` instead.
           fetchProfile(currentUser.id);
         } else {
-          // No user → no profile to load. Flip profileLoading off so
-          // pages that gate on it don't wait forever on the logged-out
-          // path (the route guard or redirect should fire instead).
           setProfileLoading(false);
         }
       } catch (err) {
@@ -381,6 +394,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchProfile]);
 
   const signOut = useCallback(async () => {
+    document.cookie = "wacrm_demo=; path=/; max-age=0";
     const supabase = createClient();
     await supabase.auth.signOut();
     setUser(null);
@@ -410,8 +424,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManageMembers: role ? canManageMembersFor(role) : false,
       canEditSettings: role ? canEditSettingsFor(role) : false,
       canSendMessages: role ? canSendMessagesFor(role) : false,
+      isSuperAdmin: Boolean(
+        profile?.is_super_admin ||
+        profile?.role === "super_admin" ||
+        (user?.email && process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS?.split(",").map(e => e.trim()).includes(user.email)) ||
+        process.env.NEXT_PUBLIC_DEMO_MODE === "true"
+      ),
     };
-  }, [profile?.account_role, profile?.account_id]);
+  }, [profile?.account_role, profile?.account_id, profile?.is_super_admin, profile?.role, user?.email]);
 
   // Signed out is not a broken account — the shell redirects to /login
   // before anything reads this.
@@ -481,6 +501,7 @@ export function useAuth(): AuthContextValue {
       canManageMembers: false,
       canEditSettings: false,
       canSendMessages: false,
+      isSuperAdmin: false,
     };
   }
   return ctx;
