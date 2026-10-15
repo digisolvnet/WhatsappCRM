@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { MOCK_SUBSCRIBERS, MOCK_PLATFORM_SETTINGS } from "@/lib/mock/data";
 import { sendTextMessage } from "@/lib/whatsapp/meta-api";
