@@ -39,6 +39,10 @@ export async function POST(request: Request) {
       super_admin_whatsapp,
       reminder_days_before,
       reminder_message_template,
+      razorpay_enabled,
+      razorpay_key_id,
+      razorpay_key_secret,
+      razorpay_webhook_secret,
     } = body;
 
     if (isDemo) {
@@ -49,6 +53,10 @@ export async function POST(request: Request) {
       if (super_admin_whatsapp !== undefined) MOCK_PLATFORM_SETTINGS.super_admin_whatsapp = super_admin_whatsapp;
       if (reminder_days_before !== undefined) MOCK_PLATFORM_SETTINGS.reminder_days_before = reminder_days_before;
       if (reminder_message_template !== undefined) MOCK_PLATFORM_SETTINGS.reminder_message_template = reminder_message_template;
+      if (razorpay_enabled !== undefined) MOCK_PLATFORM_SETTINGS.razorpay_enabled = Boolean(razorpay_enabled);
+      if (razorpay_key_id !== undefined) MOCK_PLATFORM_SETTINGS.razorpay_key_id = razorpay_key_id;
+      if (razorpay_key_secret !== undefined) MOCK_PLATFORM_SETTINGS.razorpay_key_secret = razorpay_key_secret;
+      if (razorpay_webhook_secret !== undefined) MOCK_PLATFORM_SETTINGS.razorpay_webhook_secret = razorpay_webhook_secret;
       MOCK_PLATFORM_SETTINGS.updated_at = new Date().toISOString();
 
       return NextResponse.json({ success: true, settings: MOCK_PLATFORM_SETTINGS });
@@ -100,6 +108,10 @@ export async function POST(request: Request) {
       super_admin_whatsapp: super_admin_whatsapp || "",
       reminder_days_before: reminder_days_before || [3, 1, 0],
       reminder_message_template: reminder_message_template || MOCK_PLATFORM_SETTINGS.reminder_message_template,
+      razorpay_enabled: Boolean(razorpay_enabled),
+      razorpay_key_id: razorpay_key_id || "",
+      razorpay_key_secret: razorpay_key_secret || "",
+      razorpay_webhook_secret: razorpay_webhook_secret || "",
       updated_at: new Date().toISOString(),
     };
 

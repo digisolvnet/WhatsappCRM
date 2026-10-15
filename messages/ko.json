@@ -1680,6 +1680,7 @@
       "quick-replies": "빠른 답장",
       "fields": "필드 & 태그",
       "deals": "딜 & 통화",
+      "payments": "결제 게이트웨이",
       "members": "팀원",
       "api": "API 키"
     },

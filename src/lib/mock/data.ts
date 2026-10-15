@@ -322,6 +322,10 @@ export const MOCK_PLATFORM_SETTINGS = {
   reminder_days_before: [3, 1, 0],
   reminder_message_template:
     "Hello {{name}}, your WhatsApp CRM subscription for {{account_name}} is due on {{due_date}}. To keep your CRM and WhatsApp messaging active, please complete your monthly payment of {{amount}} here: {{payment_link}}. Thank you!",
+  razorpay_enabled: true,
+  razorpay_key_id: "rzp_test_wacrm_demo_key",
+  razorpay_key_secret: "mock_rzp_secret_key",
+  razorpay_webhook_secret: "mock_rzp_webhook_secret",
   updated_at: new Date().toISOString(),
 };
 
@@ -491,4 +495,21 @@ export const MOCK_PROFILES = [
     created_at: new Date().toISOString(),
   })),
 ];
+
+export const MOCK_PAYMENT_GATEWAYS = [
+  {
+    id: "gw-1",
+    account_id: MOCK_ACCOUNT_ID,
+    provider: "razorpay",
+    is_active: true,
+    key_id: "rzp_test_wacrm_demo_key",
+    key_secret: "mock_rzp_secret_key",
+    webhook_secret: "mock_rzp_webhook_secret",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+export const MOCK_CRM_PAYMENT_LINKS: any[] = [];
+
 

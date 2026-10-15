@@ -1670,6 +1670,7 @@
       "quick-replies": "Respostas rápidas",
       "fields": "Campos e tags",
       "deals": "Negócios e moeda",
+      "payments": "Gateway de pagamento",
       "members": "Membros da equipe",
       "api": "Chaves de API"
     },

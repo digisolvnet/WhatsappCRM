@@ -30,6 +30,9 @@ import {
   Check,
   UserPlus,
   Key,
+  Eye,
+  EyeOff,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { syncMockContact, syncMockConversation, syncMockMessage } from "@/lib/mock/client";
@@ -69,6 +72,10 @@ interface PlatformSettings {
   default_payment_link: string;
   super_admin_whatsapp: string;
   reminder_message_template: string;
+  razorpay_enabled?: boolean;
+  razorpay_key_id?: string;
+  razorpay_key_secret?: string;
+  razorpay_webhook_secret?: string;
 }
 
 export default function AdminCrmPage() {
@@ -129,6 +136,9 @@ export default function AdminCrmPage() {
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isRunningCron, setIsRunningCron] = useState(false);
+  const [showRzpSecret, setShowRzpSecret] = useState(false);
+  const [copiedAdminWebhook, setCopiedAdminWebhook] = useState(false);
+  const [isRazorpayPaying, setIsRazorpayPaying] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -184,6 +194,106 @@ export default function AdminCrmPage() {
       toast.error(err.message || "Network error");
     } finally {
       setIsRenewing(false);
+    }
+  };
+
+  const handlePayWithRazorpay = async () => {
+    if (!renewingSub) return;
+    setIsRazorpayPaying(true);
+    try {
+      const months = Math.max(1, Math.round(renewDays / 30));
+      const res = await fetch("/api/payments/razorpay/checkout-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscriber_id: renewingSub.id,
+          months,
+        }),
+      });
+
+      const orderData = await res.json();
+      if (!res.ok) {
+        throw new Error(orderData.error || "Failed to create Razorpay checkout order");
+      }
+
+      // Check if Razorpay script is loaded in browser window
+      if (typeof window !== "undefined" && !(window as any).Razorpay) {
+        const script = document.createElement("script");
+        script.src = "https://checkout.razorpay.com/v1/checkout.js";
+        script.async = true;
+        document.body.appendChild(script);
+        await new Promise((resolve) => (script.onload = resolve));
+      }
+
+      if (typeof window !== "undefined" && (window as any).Razorpay) {
+        const options = {
+          key: orderData.keyId,
+          amount: Math.round(orderData.amount * 100),
+          currency: orderData.currency || "INR",
+          name: "WaCRM SaaS Subscription",
+          description: `Subscription renewal for ${renewingSub.name} (${renewDays} days)`,
+          order_id: orderData.orderId,
+          handler: async function (response: any) {
+            try {
+              const verifyRes = await fetch("/api/payments/razorpay/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  order_id: response.razorpay_order_id,
+                  payment_id: response.razorpay_payment_id,
+                  signature: response.razorpay_signature,
+                  subscriber_id: renewingSub.id,
+                  months,
+                }),
+              });
+              const vData = await verifyRes.json();
+              if (verifyRes.ok) {
+                toast.success(vData.message || "Payment verified and subscription activated!");
+                setRenewingSub(null);
+                loadData();
+              } else {
+                toast.error(vData.error || "Payment verification failed");
+              }
+            } catch (err: any) {
+              toast.error(err.message || "Failed to verify payment");
+            }
+          },
+          prefill: {
+            name: renewingSub.owner_name || renewingSub.name,
+            email: renewingSub.owner_email,
+            contact: renewingSub.billing_phone,
+          },
+          theme: {
+            color: "#10b981",
+          },
+        };
+
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
+      } else {
+        // Fallback for demo simulation if Razorpay JS couldn't load
+        const demoVerify = await fetch("/api/payments/razorpay/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_id: orderData.orderId,
+            payment_id: `pay_demo_${Date.now()}`,
+            signature: "demo_sig_manual",
+            subscriber_id: renewingSub.id,
+            months,
+          }),
+        });
+        const vData = await demoVerify.json();
+        if (demoVerify.ok) {
+          toast.success(vData.message || "Payment completed in Demo Mode!");
+          setRenewingSub(null);
+          loadData();
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to process Razorpay payment");
+    } finally {
+      setIsRazorpayPaying(false);
     }
   };
 
@@ -926,6 +1036,136 @@ export default function AdminCrmPage() {
               </button>
             </div>
           </div>
+
+          {/* Razorpay Platform Payment Gateway Card */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 md:col-span-2">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-emerald-400" />
+                <div>
+                  <h3 className="font-semibold text-foreground text-sm">Razorpay Payment Gateway (Super Admin SaaS Billing)</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Accept online subscriber payments with instant auto-renewal via UPI, Cards, and NetBanking
+                  </p>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.razorpay_enabled)}
+                  onChange={(e) =>
+                    setSettings({ ...settings, razorpay_enabled: e.target.checked })
+                  }
+                  className="rounded border-border text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                />
+                <span className="text-xs font-semibold text-foreground">Enable Razorpay</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Razorpay Key ID
+                </label>
+                <input
+                  type="text"
+                  value={settings.razorpay_key_id || ""}
+                  onChange={(e) =>
+                    setSettings({ ...settings, razorpay_key_id: e.target.value })
+                  }
+                  placeholder="rzp_live_... or rzp_test_..."
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground mt-1 block">
+                  From Razorpay Dashboard → Settings → API Keys
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Razorpay Key Secret
+                </label>
+                <div className="relative">
+                  <input
+                    type={showRzpSecret ? "text" : "password"}
+                    value={settings.razorpay_key_secret || ""}
+                    onChange={(e) =>
+                      setSettings({ ...settings, razorpay_key_secret: e.target.value })
+                    }
+                    placeholder="Key Secret from Razorpay Dashboard"
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRzpSecret(!showRzpSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showRzpSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <span className="text-[11px] text-muted-foreground mt-1 block">
+                  Used for server-side cryptographic signature verification
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Razorpay Webhook Secret (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={settings.razorpay_webhook_secret || ""}
+                  onChange={(e) =>
+                    setSettings({ ...settings, razorpay_webhook_secret: e.target.value })
+                  }
+                  placeholder="Webhook Secret entered in Razorpay Dashboard"
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Razorpay Webhook URL
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={typeof window !== "undefined" ? `${window.location.origin}/api/payments/razorpay/webhook` : "/api/payments/razorpay/webhook"}
+                    className="w-full rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        navigator.clipboard.writeText(`${window.location.origin}/api/payments/razorpay/webhook`);
+                        setCopiedAdminWebhook(true);
+                        toast.success("Webhook URL copied to clipboard");
+                        setTimeout(() => setCopiedAdminWebhook(false), 2000);
+                      }
+                    }}
+                    className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors flex items-center gap-1 shrink-0"
+                  >
+                    {copiedAdminWebhook ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copiedAdminWebhook ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <span className="text-[11px] text-muted-foreground mt-1 block">
+                  Add to Razorpay Webhooks (Events: payment_link.paid, order.paid, payment.captured)
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={handleSaveSettings}
+                disabled={isSavingSettings}
+                className="rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+              >
+                {isSavingSettings ? "Saving Settings..." : "Save Razorpay Gateway Settings"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1009,6 +1249,27 @@ export default function AdminCrmPage() {
                 />
               </div>
             </div>
+
+            {settings?.razorpay_enabled && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                    <CreditCard className="h-4 w-4" /> Instant Online Checkout
+                  </span>
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    {renewingSub.currency || "INR"} {renewAmount}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePayWithRazorpay}
+                  disabled={isRazorpayPaying}
+                  className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 py-2 text-xs font-semibold text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {isRazorpayPaying ? "Opening Razorpay..." : "⚡ Pay & Activate with Razorpay (UPI / Card / NetBanking)"}
+                </button>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-2">
               <button

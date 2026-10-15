@@ -17,6 +17,8 @@ import {
   MOCK_SUBSCRIBERS,
   MOCK_SUBSCRIPTION_PAYMENTS,
   MOCK_PLATFORM_SETTINGS,
+  MOCK_PAYMENT_GATEWAYS,
+  MOCK_CRM_PAYMENT_LINKS,
 } from "./data";
 
 export function isDemoMode(): boolean {
@@ -213,6 +215,10 @@ function getTableData(table: string): any[] {
       ];
     case "messages":
       return getMockMessages();
+    case "account_payment_gateways":
+      return MOCK_PAYMENT_GATEWAYS;
+    case "crm_payment_links":
+      return MOCK_CRM_PAYMENT_LINKS;
     default:
       return [];
   }

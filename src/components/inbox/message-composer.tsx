@@ -22,6 +22,7 @@ import {
   Plus,
   MessageSquareDashed,
   Zap,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -154,6 +155,52 @@ export function MessageComposer({
     useState<InteractiveMessagePayload>(blankButtonsPayload);
   const [savingQuickReply, setSavingQuickReply] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+
+  // Razorpay payment link dialog state
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentCurrency, setPaymentCurrency] = useState("INR");
+  const [paymentDesc, setPaymentDesc] = useState("Order payment");
+  const [isGeneratingPayment, setIsGeneratingPayment] = useState(false);
+
+  const handleCreatePaymentLink = async () => {
+    const num = Number(paymentAmount);
+    if (!num || num <= 0) {
+      toast.error("Please enter a valid amount");
+      return;
+    }
+    setIsGeneratingPayment(true);
+    try {
+      const res = await fetch("/api/payments/razorpay/create-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          amount: num,
+          currency: paymentCurrency,
+          description: paymentDesc.trim() || "Payment request",
+          send_to_chat: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create payment link");
+      }
+
+      setPaymentDialogOpen(false);
+      setPaymentAmount("");
+      setPaymentDesc("Order payment");
+
+      if (data.chatMessage) {
+        onSend(data.chatMessage, replyTo?.id);
+        toast.success("Payment link generated and posted to chat!");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create payment link");
+    } finally {
+      setIsGeneratingPayment(false);
+    }
+  };
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
@@ -694,6 +741,10 @@ export function MessageComposer({
                 <Zap className="mr-2 h-4 w-4" />
                 {t("quickReplies")}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPaymentDialogOpen(true)}>
+                <CreditCard className="mr-2 h-4 w-4 text-emerald-400" />
+                Request Payment (Razorpay)
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -811,6 +862,98 @@ export function MessageComposer({
         onOpenChange={setQuickReplyOpen}
         onPick={handlePickQuickReply}
       />
+
+      {/* Razorpay In-Chat Payment Link Dialog */}
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-5 w-5 text-emerald-500" />
+              Create Razorpay Payment Link
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2 text-xs">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Amount <span className="text-destructive">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="e.g. 500"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono text-sm"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-muted-foreground font-medium mb-1">
+                  Currency
+                </label>
+                <select
+                  value={paymentCurrency}
+                  onChange={(e) => setPaymentCurrency(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary text-xs h-[38px]"
+                >
+                  <option value="INR">INR (₹)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="AED">AED</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-muted-foreground font-medium mb-1">
+                Description / Purpose
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Order #1042 / Consultation"
+                value={paymentDesc}
+                onChange={(e) => setPaymentDesc(e.target.value)}
+                className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground focus:outline-none focus:ring-1 focus:ring-primary text-xs"
+              />
+            </div>
+
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground">💡 Supported Customer Payment Modes:</p>
+              <p className="text-[11px]">
+                UPI (GPay, PhonePe, Paytm, BHIM), Credit/Debit Cards, NetBanking, and Wallets.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPaymentDialogOpen(false)}
+              disabled={isGeneratingPayment}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreatePaymentLink}
+              disabled={isGeneratingPayment || !paymentAmount}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs"
+            >
+              {isGeneratingPayment ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-1.5 h-4 w-4" />
+                  Send Payment Link
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
