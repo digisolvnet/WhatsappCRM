@@ -255,21 +255,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // (with account_id / account_role) still resolves even if the
         // account name lookup itself can't.
         let accountRow: AccountSummary | null = null;
-        if (data.account_id) {
+        let resolvedAccountId = data.account_id;
+        let resolvedAccountRole = isAccountRole(data.account_role)
+          ? data.account_role
+          : null;
+
+        if (resolvedAccountId) {
           const { data: account, error: accountErr } = await supabase
             .from("accounts")
-            // default_currency added in migration 021; narrowed to the
-            // USD fallback below for older schemas where it reads null.
             .select("id, name, default_currency")
-            .eq("id", data.account_id)
+            .eq("id", resolvedAccountId)
             .maybeSingle();
           if (accountErr) {
-            console.error("[AuthProvider] fetchAccount error:", {
-              message: accountErr.message,
-              details: accountErr.details,
-              hint: accountErr.hint,
-              code: accountErr.code,
-            });
+            console.error("[AuthProvider] fetchAccount error:", accountErr.message);
           } else if (account) {
             accountRow = {
               id: account.id,
@@ -277,16 +275,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               default_currency: account.default_currency ?? DEFAULT_CURRENCY,
             };
           }
+        } else {
+          // Self-heal: check if this user owns an account in accounts table
+          const { data: fallbackAcc } = await supabase
+            .from("accounts")
+            .select("id, name, default_currency")
+            .or(`owner_user_id.eq.${userId},billing_email.eq.${data.email}`)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (fallbackAcc) {
+            resolvedAccountId = fallbackAcc.id;
+            resolvedAccountRole = "owner";
+            accountRow = {
+              id: fallbackAcc.id,
+              name: fallbackAcc.name,
+              default_currency: fallbackAcc.default_currency ?? DEFAULT_CURRENCY,
+            };
+          }
         }
 
-        // Narrow the DB enum into our AccountRole union. The DB
-        // constraint should make this unconditional, but a future
-        // migration that broadens the enum without updating TS would
-        // otherwise crash here — fall back to null and let UI gates
-        // treat the caller as least-privileged.
-        const accountRole = isAccountRole(data.account_role)
-          ? data.account_role
-          : null;
+        const accountRole = resolvedAccountRole;
 
         setProfile({
           id: data.id,
@@ -294,23 +304,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: data.email,
           avatar_url: data.avatar_url,
           role: data.role,
-          // `beta_features` is `NOT NULL DEFAULT ARRAY[]` in the DB, but
-          // narrow defensively in case the column hasn't been migrated yet
-          // (older deployments running 011 lazily) — `null` reads as no
-          // opt-ins, which is the safe default for any future beta gate.
           beta_features: data.beta_features ?? [],
-          account_id: data.account_id ?? null,
+          account_id: resolvedAccountId ?? null,
           account_role: accountRole,
         });
         setAccount(accountRow);
-        if (!data.account_id || !accountRole) {
-          // The row exists but carries no tenancy. Migration 017 made
-          // both columns NOT NULL for new signups, so this is a user
-          // whose bootstrap didn't complete (handle_new_user swallows a
-          // failure as a WARNING) or one predating that migration.
-          // Every insert and update they attempt will be denied by RLS.
+        if (!resolvedAccountId || !accountRole) {
           setStatusDetail(
-            `profile ${data.id} has no ${!data.account_id ? "account_id" : "account_role"}`,
+            `profile ${data.id} has no ${!resolvedAccountId ? "account_id" : "account_role"}`,
           );
         }
       } else {

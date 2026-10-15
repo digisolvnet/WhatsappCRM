@@ -38,13 +38,76 @@ async function resolveAccountId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
 ): Promise<string | null> {
-  const { data, error } = await supabase
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const db = serviceKey
+    ? createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : supabase;
+
+  // 1. Direct profile check
+  const { data: profile } = await db
     .from('profiles')
-    .select('account_id')
+    .select('account_id, email, full_name')
     .eq('user_id', userId)
-    .maybeSingle()
-  if (error || !data?.account_id) return null
-  return data.account_id as string
+    .maybeSingle();
+
+  if (profile?.account_id) return profile.account_id as string;
+
+  // 2. Self-healing: Look up account by owner_user_id or billing_email
+  let foundAccId: string | null = null;
+  const { data: accByOwner } = await db
+    .from('accounts')
+    .select('id')
+    .eq('owner_user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (accByOwner?.id) {
+    foundAccId = accByOwner.id;
+  } else if (profile?.email) {
+    const { data: accByEmail } = await db
+      .from('accounts')
+      .select('id')
+      .eq('billing_email', profile.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (accByEmail?.id) foundAccId = accByEmail.id;
+  }
+
+  // 3. If found, repair the profile link immediately
+  if (foundAccId) {
+    await db
+      .from('profiles')
+      .update({ account_id: foundAccId, account_role: 'owner' })
+      .eq('user_id', userId);
+    return foundAccId;
+  }
+
+  // 4. Fallback: auto-create workspace if completely missing
+  const { data: newAcc } = await db
+    .from('accounts')
+    .insert({
+      name: profile?.full_name || 'My Workspace',
+      owner_user_id: userId,
+      billing_email: profile?.email || null,
+      subscription_status: 'active',
+      plan_name: 'Monthly Pro',
+    })
+    .select('id')
+    .single();
+
+  if (newAcc?.id) {
+    await db
+      .from('profiles')
+      .update({ account_id: newAcc.id, account_role: 'owner' })
+      .eq('user_id', userId);
+    return newAcc.id;
+  }
+
+  return null;
 }
 
 // Lazy-initialised service-role client. We need it to detect a
