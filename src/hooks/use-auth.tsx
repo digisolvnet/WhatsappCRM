@@ -315,8 +315,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           );
         }
       } else {
-        lastFetchedUserIdRef.current = null;
-        setStatusDetail("no profiles row for the signed-in user");
+        // Auto-bootstrap profile row if missing in database
+        try {
+          const bootRes = await fetch("/api/account/bootstrap", { method: "POST" });
+          const bootData = await bootRes.json();
+          if (bootRes.ok && bootData.profile) {
+            const p = bootData.profile;
+            setProfile({
+              id: p.id || userId,
+              full_name: p.full_name || null,
+              email: p.email || "",
+              avatar_url: p.avatar_url || null,
+              role: p.role || "owner",
+              beta_features: p.beta_features || [],
+              account_id: p.account_id || null,
+              account_role: p.account_role || "owner",
+              is_super_admin: p.is_super_admin,
+            });
+            if (bootData.account) {
+              setAccount(bootData.account);
+            }
+            setStatusDetail(null);
+          } else {
+            lastFetchedUserIdRef.current = null;
+            setStatusDetail("no profiles row for the signed-in user");
+          }
+        } catch {
+          lastFetchedUserIdRef.current = null;
+          setStatusDetail("no profiles row for the signed-in user");
+        }
       }
     } catch (err) {
       console.error("[AuthProvider] fetchProfile threw:", err);
