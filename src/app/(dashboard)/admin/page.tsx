@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import {
   ShieldCheck,
@@ -70,6 +71,7 @@ interface PlatformSettings {
 }
 
 export default function AdminCrmPage() {
+  const router = useRouter();
   const { isSuperAdmin, isOwner, loading: authLoading } = useAuth();
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -196,13 +198,12 @@ export default function AdminCrmPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Payment reminder sent to customer's WhatsApp!");
-        if (data.directWhatsAppUrl) {
-          // Open direct link option
-          toast.info("WhatsApp message dispatched", {
+        toast.success("Payment reminder sent & saved to CRM Inbox!");
+        if (data.inboxUrl || data.conversationId) {
+          toast.info("Message is active in CRM Inbox", {
             action: {
-              label: "Open in WhatsApp",
-              onClick: () => window.open(data.directWhatsAppUrl, "_blank"),
+              label: "Open in CRM Inbox",
+              onClick: () => router.push(data.inboxUrl || `/inbox?c=${data.conversationId}`),
             },
           });
         }
@@ -715,6 +716,16 @@ export default function AdminCrmPage() {
                               Remind
                             </button>
 
+                            {/* CRM Inbox Chat Button */}
+                            <button
+                              onClick={() => router.push(`/inbox`)}
+                              className="inline-flex items-center gap-1 rounded bg-muted hover:bg-muted/80 text-foreground px-2 py-1 text-xs border border-border"
+                              title="Open customer conversation in CRM Inbox"
+                            >
+                              <MessageSquare className="h-3 w-3 text-emerald-400" />
+                              Inbox
+                            </button>
+
                             {/* Edit Button */}
                             <button
                               onClick={() => setEditingSub({ ...sub })}
@@ -1021,8 +1032,8 @@ export default function AdminCrmPage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
-                <Send className="h-4 w-4 text-emerald-400" />
-                Send WhatsApp Payment Reminder
+                <MessageSquare className="h-4 w-4 text-emerald-400" />
+                Send Subscription Reminder (CRM Inbox)
               </h3>
               <button
                 onClick={() => setRemindingSub(null)}
@@ -1069,31 +1080,20 @@ export default function AdminCrmPage() {
                 className="w-full rounded-lg bg-emerald-600 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Send className="h-3.5 w-3.5" />
-                {isSendingReminder ? "Sending via WhatsApp API..." : "Send Automatic WhatsApp Message"}
+                {isSendingReminder ? "Sending via CRM WhatsApp..." : "Send from CRM Inbox"}
               </button>
 
-              {remindingSub.billing_phone && (
-                <a
-                  href={`https://wa.me/${remindingSub.billing_phone.replace(/[^\d]/g, "")}?text=${encodeURIComponent(
-                    reminderCustomMsg ||
-                      (settings?.reminder_message_template || "")
-                        .replace(/{{name}}/g, remindingSub.owner_name)
-                        .replace(/{{account_name}}/g, remindingSub.name)
-                        .replace(
-                          /{{due_date}}/g,
-                          new Date(remindingSub.current_period_ends_at).toLocaleDateString()
-                        )
-                        .replace(/{{amount}}/g, `$${remindingSub.monthly_price}`)
-                        .replace(/{{payment_link}}/g, remindingSub.payment_link || settings?.default_payment_link || "")
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full rounded-lg border border-border bg-muted py-2 text-xs font-medium text-center text-muted-foreground hover:text-foreground flex items-center justify-center gap-1.5"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Or Open in WhatsApp Web / App
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setRemindingSub(null);
+                  router.push("/inbox");
+                }}
+                className="w-full rounded-lg border border-border bg-muted/60 py-2.5 text-xs font-medium text-center text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1.5"
+              >
+                <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
+                Open in CRM Inbox
+              </button>
             </div>
           </div>
         </div>

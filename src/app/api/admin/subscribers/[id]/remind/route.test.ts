@@ -24,6 +24,7 @@ const mockProfile = {
 }
 
 let updatePayload: any = null
+let insertedMessagePayload: any = null
 
 function makeMockDbClient() {
   return {
@@ -36,11 +37,17 @@ function makeMockDbClient() {
     from: vi.fn((table: string) => {
       const q: any = {
         select: vi.fn(() => q),
+        order: vi.fn(() => q),
+        limit: vi.fn(() => q),
         eq: vi.fn((col: string, val: any) => {
           if (table === 'profiles' && col === 'user_id') {
             return {
               maybeSingle: vi.fn(async () => ({
-                data: { role: isDbSuperAdmin ? 'super_admin' : 'member', is_super_admin: isDbSuperAdmin },
+                data: {
+                  role: isDbSuperAdmin ? 'super_admin' : 'member',
+                  is_super_admin: isDbSuperAdmin,
+                  account_id: 'acc-admin-main',
+                },
                 error: null,
               })),
             }
@@ -53,6 +60,20 @@ function makeMockDbClient() {
                 updatePayload = data
                 return { eq: vi.fn(async () => ({ error: null })) }
               }),
+            }
+          }
+          if (table === 'contacts' && col === 'account_id') {
+            return {
+              eq: vi.fn((col2: string) => ({
+                maybeSingle: vi.fn(async () => ({ data: { id: 'contact-acme-id' }, error: null })),
+              })),
+            }
+          }
+          if (table === 'conversations' && col === 'account_id') {
+            return {
+              eq: vi.fn((col2: string) => ({
+                maybeSingle: vi.fn(async () => ({ data: { id: 'conv-acme-id' }, error: null })),
+              })),
             }
           }
           if (table === 'profiles' && col === 'account_id') {
@@ -75,6 +96,7 @@ function makeMockDbClient() {
                 data: [
                   {
                     id: 'wac-1',
+                    account_id: 'acc-admin-main',
                     phone_number_id: '123456789',
                     access_token: 'encrypted_token',
                     status: 'connected',
@@ -90,6 +112,17 @@ function makeMockDbClient() {
           updatePayload = data
           return {
             eq: vi.fn(async () => ({ error: null })),
+          }
+        }),
+        insert: vi.fn((data: any) => {
+          if (table === 'messages') {
+            insertedMessagePayload = data
+          }
+          return {
+            select: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { id: `${table}-new-id`, ...data }, error: null })),
+              single: vi.fn(async () => ({ data: { id: `${table}-new-id`, ...data }, error: null })),
+            })),
           }
         }),
       }
@@ -122,6 +155,7 @@ describe('Admin Subscriber Remind Route (/api/admin/subscribers/[id]/remind)', (
     userId = 'user-super-admin'
     isDbSuperAdmin = true
     updatePayload = null
+    insertedMessagePayload = null
     delete process.env.NEXT_PUBLIC_DEMO_MODE
     process.env.SUPER_ADMIN_EMAILS = 'support@digisolvnet.com'
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'mock_service_key'
@@ -150,7 +184,7 @@ describe('Admin Subscriber Remind Route (/api/admin/subscribers/[id]/remind)', (
     expect(res.status).toBe(403)
   })
 
-  it('formats reminder message properly and updates last_reminder_sent_at', async () => {
+  it('formats reminder message, sends via WhatsApp, and records in CRM Inbox', async () => {
     const req = new Request('http://localhost/api/admin/subscribers/acc-123/remind', {
       method: 'POST',
       body: JSON.stringify({}),
@@ -165,7 +199,14 @@ describe('Admin Subscriber Remind Route (/api/admin/subscribers/[id]/remind)', (
     expect(json.recipientPhone).toBe('+919876543210')
     expect(json.messageText).toContain('Acme Admin')
     expect(json.messageText).toContain('INR 999')
-    expect(json.directWhatsAppUrl).toContain('wa.me/919876543210')
+    expect(json.inboxUrl).toBe('/inbox?c=conv-acme-id')
+    expect(json.conversationId).toBe('conv-acme-id')
+
+    // Verify reminder logged directly in CRM Inbox messages table
+    expect(insertedMessagePayload).toBeDefined()
+    expect(insertedMessagePayload.conversation_id).toBe('conv-acme-id')
+    expect(insertedMessagePayload.sender_type).toBe('agent')
+    expect(insertedMessagePayload.content_text).toContain('Acme Admin')
 
     // Verify dbClient executed update on accounts table
     expect(updatePayload).toBeDefined()

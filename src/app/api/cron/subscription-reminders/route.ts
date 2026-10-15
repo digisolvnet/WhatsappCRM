@@ -163,6 +163,93 @@ async function handleCronReminders(request: Request) {
         } catch (err: any) {
           sendStatus = `failed: ${err.message}`;
         }
+
+        // Record automated reminder directly into CRM Inbox
+        if (senderConfig.account_id) {
+          try {
+            let contactId: string | null = null;
+            let conversationId: string | null = null;
+
+            const { data: existingContact } = await supabase
+              .from("contacts")
+              .select("id")
+              .eq("account_id", senderConfig.account_id)
+              .eq("phone", recipientPhone)
+              .maybeSingle();
+
+            if (existingContact?.id) {
+              contactId = existingContact.id;
+            } else {
+              const { data: newContact } = await supabase
+                .from("contacts")
+                .insert({
+                  account_id: senderConfig.account_id,
+                  user_id: senderConfig.user_id,
+                  phone: recipientPhone,
+                  name: owner?.full_name || acc.name,
+                  email: acc.billing_email || owner?.email || null,
+                  company: acc.name,
+                })
+                .select("id")
+                .maybeSingle();
+              if (newContact?.id) contactId = newContact.id;
+            }
+
+            if (contactId) {
+              const { data: existingConv } = await supabase
+                .from("conversations")
+                .select("id")
+                .eq("account_id", senderConfig.account_id)
+                .eq("contact_id", contactId)
+                .maybeSingle();
+
+              if (existingConv?.id) {
+                conversationId = existingConv.id;
+              } else {
+                const { data: newConv } = await supabase
+                  .from("conversations")
+                  .insert({
+                    account_id: senderConfig.account_id,
+                    user_id: senderConfig.user_id,
+                    contact_id: contactId,
+                    status: "open",
+                    last_message_text: messageText,
+                    last_message_at: now.toISOString(),
+                  })
+                  .select("id")
+                  .maybeSingle();
+                if (newConv?.id) conversationId = newConv.id;
+              }
+
+              if (conversationId) {
+                await supabase
+                  .from("messages")
+                  .insert({
+                    account_id: senderConfig.account_id,
+                    conversation_id: conversationId,
+                    sender_type: "agent",
+                    sender_id: senderConfig.user_id,
+                    content_type: "text",
+                    content_text: messageText,
+                    status: sendStatus === "delivered" ? "delivered" : "sent",
+                    created_at: now.toISOString(),
+                  });
+
+                await supabase
+                  .from("conversations")
+                  .update({
+                    last_message_text: messageText,
+                    last_message_at: now.toISOString(),
+                    status: "open",
+                    updated_at: now.toISOString(),
+                  })
+                  .eq("id", conversationId);
+              }
+            }
+          } catch (inboxErr) {
+            console.warn("[Cron Reminders] Could not log message to inbox:", inboxErr);
+          }
+        }
       }
 
       // If expired beyond 2 days grace period, mark past_due

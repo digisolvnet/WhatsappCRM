@@ -20,15 +20,15 @@ export async function POST(
     let template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
     let defaultPayLink = MOCK_PLATFORM_SETTINGS.default_payment_link;
     let dbClient: any = null;
+    let user: any = null;
 
     if (isDemo) {
       sub = MOCK_SUBSCRIBERS.find((s) => s.id === id);
     } else {
       const supabase = await createClient();
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+      const authRes = await supabase.auth.getUser();
+      user = authRes.data.user;
+      const authError = authRes.error;
 
       if (authError || !user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -142,9 +142,10 @@ export async function POST(
 
     let sentViaApi = false;
     let apiError: string | null = null;
+    let conversationId: string | null = null;
 
     if (!isDemo && dbClient) {
-      // Look up super admin's whatsapp config to send automated API message
+      // 1. Send automated WhatsApp API message if connected
       const { data: whatsappConfigs } = await dbClient
         .from("whatsapp_config")
         .select("*")
@@ -167,7 +168,120 @@ export async function POST(
         }
       }
 
-      // Update last_reminder_sent_at on account
+      // 2. Log & share message directly inside the CRM Inbox!
+      try {
+        // Resolve Super Admin's account
+        let adminAccountId: string | null = null;
+        const { data: adminProf } = await dbClient
+          .from("profiles")
+          .select("account_id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        adminAccountId = adminProf?.account_id || null;
+
+        if (!adminAccountId && whatsappConfigs?.[0]?.account_id) {
+          adminAccountId = whatsappConfigs[0].account_id;
+        }
+
+        if (!adminAccountId) {
+          const { data: adminAcc } = await dbClient
+            .from("accounts")
+            .select("id")
+            .eq("owner_user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          adminAccountId = adminAcc?.id || null;
+        }
+
+        if (adminAccountId) {
+          // Find or create Contact in Super Admin's workspace
+          let contactId: string | null = null;
+          const { data: existingContact } = await dbClient
+            .from("contacts")
+            .select("id")
+            .eq("account_id", adminAccountId)
+            .eq("phone", recipientPhone)
+            .maybeSingle();
+
+          if (existingContact?.id) {
+            contactId = existingContact.id;
+          } else {
+            const { data: newContact } = await dbClient
+              .from("contacts")
+              .insert({
+                account_id: adminAccountId,
+                user_id: user.id,
+                phone: recipientPhone,
+                name: sub.owner_name || sub.name,
+                email: sub.owner_email && sub.owner_email !== "No email" ? sub.owner_email : null,
+                company: sub.name,
+              })
+              .select("id")
+              .maybeSingle();
+            if (newContact?.id) contactId = newContact.id;
+          }
+
+          if (contactId) {
+            // Find or create Conversation
+            const { data: existingConv } = await dbClient
+              .from("conversations")
+              .select("id")
+              .eq("account_id", adminAccountId)
+              .eq("contact_id", contactId)
+              .maybeSingle();
+
+            if (existingConv?.id) {
+              conversationId = existingConv.id;
+            } else {
+              const { data: newConv } = await dbClient
+                .from("conversations")
+                .insert({
+                  account_id: adminAccountId,
+                  user_id: user.id,
+                  contact_id: contactId,
+                  status: "open",
+                  last_message_text: messageText,
+                  last_message_at: new Date().toISOString(),
+                })
+                .select("id")
+                .maybeSingle();
+              if (newConv?.id) conversationId = newConv.id;
+            }
+
+            if (conversationId) {
+              // Insert message row into CRM Inbox
+              await dbClient
+                .from("messages")
+                .insert({
+                  account_id: adminAccountId,
+                  conversation_id: conversationId,
+                  sender_type: "agent",
+                  sender_id: user.id,
+                  content_type: "text",
+                  content_text: messageText,
+                  status: sentViaApi ? "delivered" : "sent",
+                  created_at: new Date().toISOString(),
+                });
+
+              // Update conversation preview and timestamp
+              await dbClient
+                .from("conversations")
+                .update({
+                  last_message_text: messageText,
+                  last_message_at: new Date().toISOString(),
+                  status: "open",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", conversationId);
+            }
+          }
+        }
+      } catch (inboxErr: any) {
+        console.warn("[Admin Remind] Could not sync message to CRM Inbox:", inboxErr?.message);
+      }
+
+      // 3. Update last_reminder_sent_at on account
       await dbClient
         .from("accounts")
         .update({
@@ -180,6 +294,7 @@ export async function POST(
       sentViaApi = true;
       sub.last_reminder_sent_at = new Date().toISOString();
       sub.reminder_count = (sub.reminder_count || 0) + 1;
+      conversationId = "demo-conv-1";
     }
 
     return NextResponse.json({
@@ -188,6 +303,8 @@ export async function POST(
       apiError,
       messageText,
       recipientPhone,
+      conversationId,
+      inboxUrl: conversationId ? `/inbox?c=${conversationId}` : "/inbox",
       directWhatsAppUrl,
       last_reminder_sent_at: new Date().toISOString(),
     });
