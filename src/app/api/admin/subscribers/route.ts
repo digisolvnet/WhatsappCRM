@@ -51,8 +51,12 @@ export async function GET(request: Request) {
       .eq("user_id", user.id)
       .single();
 
-    const allowedEmails = process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS?.split(",").map((e) => e.trim()) || [];
-    const isSuperAdmin = profile?.is_super_admin || profile?.role === "super_admin" || (user.email && allowedEmails.includes(user.email));
+    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS;
+    const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
+    const isSuperAdmin =
+      profile?.is_super_admin ||
+      profile?.role === "super_admin" ||
+      (user.email && allowedEmails.includes(user.email.toLowerCase()));
 
     if (!isSuperAdmin) {
       return NextResponse.json({ error: "Forbidden: Super Admin access required" }, { status: 403 });
