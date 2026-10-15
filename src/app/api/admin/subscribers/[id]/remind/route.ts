@@ -25,6 +25,43 @@ export async function POST(
       sub = MOCK_SUBSCRIBERS.find((s) => s.id === id);
     } else {
       const supabase = await createClient();
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
+      // Verify Super Admin access
+      let isDbSuperAdmin = false;
+      try {
+        const { data: pRole } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (pRole?.role === "super_admin") isDbSuperAdmin = true;
+
+        const { data: pAdmin } = await supabase
+          .from("profiles")
+          .select("is_super_admin")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (pAdmin?.is_super_admin) isDbSuperAdmin = true;
+      } catch {}
+
+      const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "support@digisolvnet.com";
+      const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
+      const isSuperAdmin =
+        isDbSuperAdmin ||
+        (user.email && allowedEmails.includes(user.email.toLowerCase()));
+
+      if (!isSuperAdmin) {
+        return NextResponse.json({ error: "Forbidden: Super Admin access required" }, { status: 403 });
+      }
+
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
       dbClient = serviceKey
         ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
