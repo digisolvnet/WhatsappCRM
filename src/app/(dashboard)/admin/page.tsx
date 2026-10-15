@@ -96,7 +96,6 @@ export default function AdminCrmPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [subRes, setRes] = useState();
       const res = await fetch("/api/admin/subscribers");
       const data = await res.json();
       if (res.ok) {

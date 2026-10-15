@@ -313,24 +313,23 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
       {
         id: 'msg-demo-1',
         kind: 'message',
-        title: 'New customer message from Alex Johnson',
-        timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-        details: 'Sounds great! Could you send over the custom quote for 25 seats?',
-        conversationId: 'conv-1',
+        text: 'New customer message from Alex Johnson: "Sounds great! Could you send over the custom quote for 25 seats?"',
+        at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        href: '/inbox',
       },
       {
         id: 'deal-demo-1',
         kind: 'deal',
-        title: 'Deal moved to Proposal Sent',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
-        details: 'TechCorp 25-Seat Enterprise Contract ($12,500)',
+        text: 'Deal moved to Proposal Sent: TechCorp 25-Seat Contract ($12,500)',
+        at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+        href: '/pipelines',
       },
       {
         id: 'contact-demo-1',
         kind: 'contact',
-        title: 'New contact added: Sarah Miller',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-        details: '+14155558923 (Apex Ventures)',
+        text: 'New contact added: Sarah Miller (+14155558923 - Apex Ventures)',
+        at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+        href: '/contacts',
       },
     ]
   }
