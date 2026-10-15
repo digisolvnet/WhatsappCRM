@@ -440,10 +440,30 @@ function InboxPageInner() {
               ),
             );
           }
+        } else {
+          // Deep link conversation is not in loaded slice — hydrate and activate it
+          hydrateConversation(deepLinkConvId).then(async () => {
+            try {
+              const supabase = createClient();
+              const { data } = await supabase
+                .from("conversations")
+                .select(CONVERSATION_SELECT)
+                .eq("id", deepLinkConvId)
+                .maybeSingle();
+              if (data) {
+                const fetched = normalizeConversation(data);
+                setActiveConversation(fetched);
+                setActiveContact(fetched.contact ?? null);
+                setMessages([]);
+              }
+            } catch (err) {
+              console.warn("Failed to activate deep-linked conversation:", err);
+            }
+          });
         }
       }
     },
-    [deepLinkConvId, activeConversation?.id]
+    [deepLinkConvId, activeConversation?.id, hydrateConversation]
   );
 
   const handleSelectConversation = useCallback(

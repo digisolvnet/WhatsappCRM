@@ -32,6 +32,7 @@ import {
   Key,
 } from "lucide-react";
 import { toast } from "sonner";
+import { syncMockContact, syncMockConversation, syncMockMessage } from "@/lib/mock/client";
 
 interface Subscriber {
   id: string;
@@ -198,15 +199,19 @@ export default function AdminCrmPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Payment reminder sent & saved to CRM Inbox!");
-        if (data.inboxUrl || data.conversationId) {
-          toast.info("Message is active in CRM Inbox", {
-            action: {
-              label: "Open in CRM Inbox",
-              onClick: () => router.push(data.inboxUrl || `/inbox?c=${data.conversationId}`),
-            },
-          });
+        if (data.mockData) {
+          if (data.mockData.contact) syncMockContact(data.mockData.contact);
+          if (data.mockData.conversation) syncMockConversation(data.mockData.conversation);
+          if (data.mockData.message) syncMockMessage(data.mockData.message);
         }
+        toast.success("Payment reminder sent & saved to CRM Inbox!");
+        const targetUrl = data.inboxUrl || (data.conversationId ? `/inbox?c=${data.conversationId}` : `/inbox?c=conv-sub-${sub.id}`);
+        toast.info("Message is active in CRM Inbox", {
+          action: {
+            label: "Open in CRM Inbox",
+            onClick: () => router.push(targetUrl),
+          },
+        });
         setRemindingSub(null);
         loadData();
       } else {
@@ -718,7 +723,7 @@ export default function AdminCrmPage() {
 
                             {/* CRM Inbox Chat Button */}
                             <button
-                              onClick={() => router.push(`/inbox`)}
+                              onClick={() => router.push(`/inbox?c=conv-sub-${sub.id}`)}
                               className="inline-flex items-center gap-1 rounded bg-muted hover:bg-muted/80 text-foreground px-2 py-1 text-xs border border-border"
                               title="Open customer conversation in CRM Inbox"
                             >
@@ -1086,8 +1091,9 @@ export default function AdminCrmPage() {
               <button
                 type="button"
                 onClick={() => {
+                  const targetId = remindingSub.id;
                   setRemindingSub(null);
-                  router.push("/inbox");
+                  router.push(`/inbox?c=conv-sub-${targetId}`);
                 }}
                 className="w-full rounded-lg border border-border bg-muted/60 py-2.5 text-xs font-medium text-center text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-1.5"
               >

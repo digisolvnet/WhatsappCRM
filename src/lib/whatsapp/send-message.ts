@@ -269,10 +269,24 @@ export async function sendMessageToConversation(
     );
   }
 
-  const accessToken = decrypt(config.access_token);
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
+  let accessToken = '';
+  if (isDemo || config.access_token === 'mock-access-token') {
+    accessToken = 'mock-access-token';
+  } else {
+    try {
+      accessToken = decrypt(config.access_token);
+    } catch (decryptErr) {
+      if (isDemo) {
+        accessToken = 'mock-access-token';
+      } else {
+        throw decryptErr;
+      }
+    }
+  }
 
   // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
-  if (isLegacyFormat(config.access_token)) {
+  if (!isDemo && isLegacyFormat(config.access_token)) {
     void db
       .from('whatsapp_config')
       .update({ access_token: encrypt(accessToken) })
@@ -418,6 +432,12 @@ export async function sendMessageToConversation(
 
     for (const variant of variants) {
       try {
+        if (isDemo || accessToken === 'mock-access-token') {
+          waMessageId = `wamid.demo.${Date.now()}.${Math.floor(Math.random() * 1000)}`;
+          workingPhone = variant;
+          lastError = null;
+          break;
+        }
         waMessageId = await attempt(variant);
         workingPhone = variant;
         lastError = null;

@@ -100,6 +100,7 @@ export const MOCK_CONTACTS = [
 export const MOCK_CONVERSATIONS = [
   {
     id: "conv-1",
+    account_id: MOCK_ACCOUNT_ID,
     user_id: MOCK_USER_ID,
     contact_id: "contact-1",
     status: "open",
@@ -112,6 +113,7 @@ export const MOCK_CONVERSATIONS = [
   },
   {
     id: "conv-2",
+    account_id: MOCK_ACCOUNT_ID,
     user_id: MOCK_USER_ID,
     contact_id: "contact-2",
     status: "pending",
@@ -124,6 +126,7 @@ export const MOCK_CONVERSATIONS = [
   },
   {
     id: "conv-3",
+    account_id: MOCK_ACCOUNT_ID,
     user_id: MOCK_USER_ID,
     contact_id: "contact-3",
     status: "closed",

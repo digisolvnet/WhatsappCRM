@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { MOCK_SUBSCRIBERS, MOCK_PLATFORM_SETTINGS } from "@/lib/mock/data";
+import {
+  MOCK_SUBSCRIBERS,
+  MOCK_PLATFORM_SETTINGS,
+  MOCK_CONTACTS,
+  MOCK_CONVERSATIONS,
+  MOCK_MESSAGES,
+  MOCK_USER_ID,
+  MOCK_ACCOUNT_ID,
+} from "@/lib/mock/data";
 import { sendTextMessage } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
 
@@ -54,6 +62,73 @@ async function handleCronReminders(request: Request) {
             action: `Sent ${daysRemaining}-day payment reminder`,
             phone: sub.billing_phone,
             status: "sent_demo",
+          });
+
+          // Sync into mock CRM Inbox
+          const template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
+          const dueDateStr = expiry.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+          const payLink = sub.payment_link || MOCK_PLATFORM_SETTINGS.default_payment_link || "https://example.com/pay";
+          const msgText = template
+            .replace(/{{name}}/g, sub.owner_name || sub.name)
+            .replace(/{{account_name}}/g, sub.name)
+            .replace(/{{due_date}}/g, dueDateStr)
+            .replace(/{{amount}}/g, `$${sub.monthly_price || 49}`)
+            .replace(/{{payment_link}}/g, payLink);
+
+          const convId = `conv-sub-${sub.id}`;
+          const contactId = `contact-sub-${sub.id}`;
+          let contact = MOCK_CONTACTS.find((c) => c.id === contactId || c.phone === sub.billing_phone);
+          if (!contact) {
+            contact = {
+              id: contactId,
+              user_id: MOCK_USER_ID,
+              account_id: MOCK_ACCOUNT_ID,
+              phone: sub.billing_phone || "+10000000000",
+              name: sub.owner_name || sub.name,
+              email: sub.owner_email || "",
+              company: sub.name,
+              created_at: now.toISOString(),
+              updated_at: now.toISOString(),
+              tags: [],
+            };
+            MOCK_CONTACTS.unshift(contact);
+          }
+
+          let conv = MOCK_CONVERSATIONS.find((c) => c.id === convId);
+          if (!conv) {
+            conv = {
+              id: convId,
+              account_id: MOCK_ACCOUNT_ID,
+              user_id: MOCK_USER_ID,
+              contact_id: contact.id,
+              status: "open",
+              last_message_text: msgText,
+              last_message_at: now.toISOString(),
+              unread_count: 0,
+              created_at: now.toISOString(),
+              updated_at: now.toISOString(),
+              contact,
+            };
+            MOCK_CONVERSATIONS.unshift(conv);
+          } else {
+            conv.last_message_text = msgText;
+            conv.last_message_at = now.toISOString();
+            const idx = MOCK_CONVERSATIONS.indexOf(conv);
+            if (idx > 0) {
+              MOCK_CONVERSATIONS.splice(idx, 1);
+              MOCK_CONVERSATIONS.unshift(conv);
+            }
+          }
+
+          if (!MOCK_MESSAGES[convId]) MOCK_MESSAGES[convId] = [];
+          MOCK_MESSAGES[convId].push({
+            id: `msg-${Date.now()}-${sub.id}`,
+            conversation_id: convId,
+            sender_type: "agent",
+            content_type: "text",
+            content_text: msgText,
+            created_at: now.toISOString(),
+            status: "delivered",
           });
         } else if (daysRemaining < 0 && sub.subscription_status !== "suspended") {
           sub.subscription_status = "past_due";

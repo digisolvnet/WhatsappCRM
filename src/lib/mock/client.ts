@@ -2,6 +2,8 @@ import {
   MOCK_USER,
   MOCK_PROFILE,
   MOCK_ACCOUNT,
+  MOCK_ACCOUNT_ID,
+  MOCK_USER_ID,
   MOCK_TAGS,
   MOCK_CONTACTS,
   MOCK_CONVERSATIONS,
@@ -17,11 +19,147 @@ import {
 } from "./data";
 
 export function isDemoMode(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") {
+    return process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+  }
   return (
     document.cookie.includes("wacrm_demo=true") ||
     process.env.NEXT_PUBLIC_DEMO_MODE === "true"
   );
+}
+
+const STORAGE_KEY_CONVS = "wacrm:mock:conversations";
+const STORAGE_KEY_MSGS = "wacrm:mock:messages";
+const STORAGE_KEY_CONTACTS = "wacrm:mock:contacts";
+
+export function getMockContacts(): any[] {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_CONTACTS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return MOCK_CONTACTS;
+}
+
+export function getMockConversations(): any[] {
+  let convs = MOCK_CONVERSATIONS;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_CONVS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) convs = parsed;
+      }
+    } catch {}
+  }
+
+  // Ensure every conversation has contact joined and account_id attached
+  const contacts = getMockContacts();
+  return convs.map((c) => {
+    if (!c.contact && c.contact_id) {
+      const found = contacts.find((ct) => ct.id === c.contact_id);
+      if (found) return { ...c, account_id: c.account_id || MOCK_ACCOUNT_ID, contact: found };
+    }
+    return { ...c, account_id: c.account_id || MOCK_ACCOUNT_ID };
+  });
+}
+
+export function getMockMessages(convId?: string): any[] {
+  let msgsMap = MOCK_MESSAGES;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_MSGS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object") msgsMap = parsed;
+      }
+    } catch {}
+  }
+
+  if (convId) {
+    return msgsMap[convId] ? [...msgsMap[convId]] : [];
+  }
+  return Object.values(msgsMap).flat();
+}
+
+export function syncMockContact(contact: any) {
+  const current = getMockContacts();
+  const idx = current.findIndex((c) => c.id === contact.id || (contact.phone && c.phone === contact.phone));
+  if (idx >= 0) {
+    current[idx] = { ...current[idx], ...contact };
+  } else {
+    current.unshift(contact);
+  }
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY_CONTACTS, JSON.stringify(current));
+    } catch {}
+  }
+}
+
+export function syncMockConversation(conv: any) {
+  const current = getMockConversations();
+  const idx = current.findIndex((c) => c.id === conv.id);
+  if (idx >= 0) {
+    current[idx] = { ...current[idx], ...conv };
+    // Move to top
+    if (idx > 0) {
+      const [item] = current.splice(idx, 1);
+      current.unshift(item);
+    }
+  } else {
+    current.unshift(conv);
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(current));
+    } catch {}
+  }
+}
+
+export function syncMockMessage(msg: any) {
+  let msgsMap: Record<string, any[]> = MOCK_MESSAGES;
+  if (typeof window !== "undefined") {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_MSGS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object") msgsMap = parsed;
+      }
+    } catch {}
+  }
+
+  const convId = msg.conversation_id;
+  if (!msgsMap[convId]) {
+    msgsMap[convId] = [];
+  }
+  const existingIdx = msgsMap[convId].findIndex((m) => m.id === msg.id);
+  if (existingIdx >= 0) {
+    msgsMap[convId][existingIdx] = { ...msgsMap[convId][existingIdx], ...msg };
+  } else {
+    msgsMap[convId].push(msg);
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(STORAGE_KEY_MSGS, JSON.stringify(msgsMap));
+    } catch {}
+  }
+
+  // Also update parent conversation preview
+  const currentConvs = getMockConversations();
+  const conv = currentConvs.find((c) => c.id === convId);
+  if (conv) {
+    conv.last_message_text = msg.content_text || msg.message || "[Message]";
+    conv.last_message_at = msg.created_at || new Date().toISOString();
+    conv.status = "open";
+    syncMockConversation(conv);
+  }
 }
 
 function getTableData(table: string): any[] {
@@ -37,9 +175,9 @@ function getTableData(table: string): any[] {
     case "tags":
       return MOCK_TAGS;
     case "contacts":
-      return MOCK_CONTACTS;
+      return getMockContacts();
     case "conversations":
-      return MOCK_CONVERSATIONS;
+      return getMockConversations();
     case "pipelines":
       return MOCK_PIPELINES;
     case "pipeline_stages":
@@ -57,9 +195,23 @@ function getTableData(table: string): any[] {
         { id: "ct-3", contact_id: "contact-2", tag_id: "tag-2" },
       ];
     case "whatsapp_config":
-      return [{ status: "connected", phone_number: "+1 555-0199", display_phone_number: "+1 (555) 0199" }];
+      return [
+        {
+          id: "mock-wa-config-1",
+          account_id: MOCK_ACCOUNT_ID,
+          user_id: MOCK_USER_ID,
+          status: "connected",
+          phone_number: "+1 555-0199",
+          display_phone_number: "+1 (555) 0199",
+          phone_number_id: "mock-phone-num-id",
+          waba_id: "mock-waba-id",
+          access_token: "mock-access-token",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
     case "messages":
-      return Object.values(MOCK_MESSAGES).flat();
+      return getMockMessages();
     default:
       return [];
   }
@@ -123,6 +275,14 @@ class MockQueryBuilder {
   }
 
   order(column: string, options?: { ascending?: boolean }) {
+    const ascending = options?.ascending ?? true;
+    this.data.sort((a, b) => {
+      const valA = a[column] ?? "";
+      const valB = b[column] ?? "";
+      if (valA < valB) return ascending ? -1 : 1;
+      if (valA > valB) return ascending ? 1 : -1;
+      return 0;
+    });
     return this;
   }
 
@@ -147,34 +307,62 @@ class MockQueryBuilder {
   }
 
   insert(payload: any) {
-    const arr = Array.isArray(payload) ? payload : [payload];
+    const rawArr = Array.isArray(payload) ? payload : [payload];
+    const insertedItems = rawArr.map((item) => {
+      const fullItem = {
+        id: item.id || `${this.table === "messages" ? "msg" : this.table.slice(0, 4)}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        created_at: item.created_at || new Date().toISOString(),
+        ...item,
+      };
+
+      if (this.table === "messages") {
+        syncMockMessage(fullItem);
+      } else if (this.table === "conversations") {
+        syncMockConversation(fullItem);
+      } else if (this.table === "contacts") {
+        syncMockContact(fullItem);
+      }
+
+      return fullItem;
+    });
+
     return {
       select: () => ({
-        single: async () => ({ data: arr[0], error: null }),
-        maybeSingle: async () => ({ data: arr[0], error: null }),
-        then: (resolve: any) => resolve({ data: arr, error: null }),
+        single: async () => ({ data: insertedItems[0], error: null }),
+        maybeSingle: async () => ({ data: insertedItems[0], error: null }),
+        then: (resolve: any) => resolve({ data: insertedItems, error: null }),
       }),
-      then: (resolve: any) => resolve({ data: arr, error: null }),
+      then: (resolve: any) => resolve({ data: insertedItems, error: null }),
     };
   }
 
   upsert(payload: any, options?: any) {
-    const arr = Array.isArray(payload) ? payload : [payload];
-    return {
-      select: () => ({
-        single: async () => ({ data: arr[0], error: null }),
-        maybeSingle: async () => ({ data: arr[0], error: null }),
-        then: (resolve: any) => resolve({ data: arr, error: null }),
-      }),
-      then: (resolve: any) => resolve({ data: arr, error: null }),
-    };
+    return this.insert(payload);
   }
 
   update(payload: any) {
+    const table = this.table;
     return {
-      eq: () => ({
-        then: (resolve: any) => resolve({ data: payload, error: null }),
-      }),
+      eq: (column: string, value: any) => {
+        if (table === "conversations") {
+          const convs = getMockConversations();
+          const target = convs.find((c) => c[column] === value);
+          if (target) {
+            Object.assign(target, payload);
+            syncMockConversation(target);
+          }
+        } else if (table === "messages") {
+          const msgs = getMockMessages();
+          const target = msgs.find((m) => m[column] === value);
+          if (target) {
+            Object.assign(target, payload);
+            syncMockMessage(target);
+          }
+        }
+        return {
+          then: (resolve: any) => resolve({ data: payload, error: null }),
+        };
+      },
       then: (resolve: any) => resolve({ data: payload, error: null }),
     };
   }
@@ -206,8 +394,9 @@ export function createMockClient(): any {
     from: (table: string) => new MockQueryBuilder(table),
     rpc: async (fn: string, params?: any) => {
       if (fn === "filter_contacts_by_tags") {
+        const contacts = getMockContacts();
         return {
-          data: MOCK_CONTACTS.map((c) => ({ contact: c, total_count: MOCK_CONTACTS.length })),
+          data: contacts.map((c) => ({ contact: c, total_count: contacts.length })),
           error: null,
         };
       }
@@ -240,15 +429,18 @@ export function createMockClient(): any {
         },
       }),
     },
-    channel: () => ({
-      on: function () {
-        return this;
-      },
-      subscribe: () => ({
+    channel: () => {
+      const channelObj: any = {
+        on: function () {
+          return channelObj;
+        },
+        subscribe: () => ({
+          unsubscribe: () => {},
+        }),
         unsubscribe: () => {},
-      }),
-      unsubscribe: () => {},
-    }),
+      };
+      return channelObj;
+    },
     removeChannel: async () => "ok",
     getChannels: () => [],
   };

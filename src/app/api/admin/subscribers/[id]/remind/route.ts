@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import { MOCK_SUBSCRIBERS, MOCK_PLATFORM_SETTINGS } from "@/lib/mock/data";
+import {
+  MOCK_SUBSCRIBERS,
+  MOCK_PLATFORM_SETTINGS,
+  MOCK_CONTACTS,
+  MOCK_CONVERSATIONS,
+  MOCK_MESSAGES,
+  MOCK_USER_ID,
+  MOCK_ACCOUNT_ID,
+} from "@/lib/mock/data";
 import { sendTextMessage } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
 
@@ -194,87 +202,101 @@ export async function POST(
           adminAccountId = adminAcc?.id || null;
         }
 
-        if (adminAccountId) {
-          // Find or create Contact in Super Admin's workspace
-          let contactId: string | null = null;
-          const { data: existingContact } = await dbClient
-            .from("contacts")
-            .select("id")
-            .eq("account_id", adminAccountId)
-            .eq("phone", recipientPhone)
-            .maybeSingle();
+        if (!adminAccountId) {
+          adminAccountId = sub.id;
+        }
 
-          if (existingContact?.id) {
-            contactId = existingContact.id;
-          } else {
-            const { data: newContact } = await dbClient
+        // Sync to both Super Admin workspace and customer's workspace
+        const targetAccountIds = Array.from(new Set([adminAccountId, sub.id].filter(Boolean))) as string[];
+        for (const targetAccId of targetAccountIds) {
+          try {
+            let contactId: string | null = null;
+            let convId: string | null = null;
+
+            // Find or create Contact in workspace
+            const { data: existingContact } = await dbClient
               .from("contacts")
-              .insert({
-                account_id: adminAccountId,
-                user_id: user.id,
-                phone: recipientPhone,
-                name: sub.owner_name || sub.name,
-                email: sub.owner_email && sub.owner_email !== "No email" ? sub.owner_email : null,
-                company: sub.name,
-              })
               .select("id")
-              .maybeSingle();
-            if (newContact?.id) contactId = newContact.id;
-          }
-
-          if (contactId) {
-            // Find or create Conversation
-            const { data: existingConv } = await dbClient
-              .from("conversations")
-              .select("id")
-              .eq("account_id", adminAccountId)
-              .eq("contact_id", contactId)
+              .eq("account_id", targetAccId)
+              .eq("phone", recipientPhone)
               .maybeSingle();
 
-            if (existingConv?.id) {
-              conversationId = existingConv.id;
+            if (existingContact?.id) {
+              contactId = existingContact.id;
             } else {
-              const { data: newConv } = await dbClient
-                .from("conversations")
+              const { data: newContact } = await dbClient
+                .from("contacts")
                 .insert({
-                  account_id: adminAccountId,
+                  account_id: targetAccId,
                   user_id: user.id,
-                  contact_id: contactId,
-                  status: "open",
-                  last_message_text: messageText,
-                  last_message_at: new Date().toISOString(),
+                  phone: recipientPhone,
+                  name: sub.owner_name || sub.name,
+                  email: sub.owner_email && sub.owner_email !== "No email" ? sub.owner_email : null,
+                  company: sub.name,
                 })
                 .select("id")
                 .maybeSingle();
-              if (newConv?.id) conversationId = newConv.id;
+              if (newContact?.id) contactId = newContact.id;
             }
 
-            if (conversationId) {
-              // Insert message row into CRM Inbox
-              await dbClient
-                .from("messages")
-                .insert({
-                  account_id: adminAccountId,
-                  conversation_id: conversationId,
-                  sender_type: "agent",
-                  sender_id: user.id,
-                  content_type: "text",
-                  content_text: messageText,
-                  status: sentViaApi ? "delivered" : "sent",
-                  created_at: new Date().toISOString(),
-                });
-
-              // Update conversation preview and timestamp
-              await dbClient
+            if (contactId) {
+              // Find or create Conversation
+              const { data: existingConv } = await dbClient
                 .from("conversations")
-                .update({
-                  last_message_text: messageText,
-                  last_message_at: new Date().toISOString(),
-                  status: "open",
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", conversationId);
+                .select("id")
+                .eq("account_id", targetAccId)
+                .eq("contact_id", contactId)
+                .maybeSingle();
+
+              if (existingConv?.id) {
+                convId = existingConv.id;
+              } else {
+                const { data: newConv } = await dbClient
+                  .from("conversations")
+                  .insert({
+                    account_id: targetAccId,
+                    user_id: user.id,
+                    contact_id: contactId,
+                    status: "open",
+                    last_message_text: messageText,
+                    last_message_at: new Date().toISOString(),
+                  })
+                  .select("id")
+                  .maybeSingle();
+                if (newConv?.id) convId = newConv.id;
+              }
+
+              if (convId) {
+                if (!conversationId) conversationId = convId;
+
+                // Insert message row into CRM Inbox
+                await dbClient
+                  .from("messages")
+                  .insert({
+                    account_id: targetAccId,
+                    conversation_id: convId,
+                    sender_type: "agent",
+                    sender_id: user.id,
+                    content_type: "text",
+                    content_text: messageText,
+                    status: sentViaApi ? "delivered" : "sent",
+                    created_at: new Date().toISOString(),
+                  });
+
+                // Update conversation preview and timestamp
+                await dbClient
+                  .from("conversations")
+                  .update({
+                    last_message_text: messageText,
+                    last_message_at: new Date().toISOString(),
+                    status: "open",
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", convId);
+              }
             }
+          } catch (accErr: any) {
+            console.warn(`[Admin Remind] Error logging to account ${targetAccId}:`, accErr?.message);
           }
         }
       } catch (inboxErr: any) {
@@ -290,11 +312,83 @@ export async function POST(
         })
         .eq("id", id);
     } else {
-      // In demo mode
+      // In demo mode: create/update contact, conversation, and message in mock state
       sentViaApi = true;
       sub.last_reminder_sent_at = new Date().toISOString();
       sub.reminder_count = (sub.reminder_count || 0) + 1;
-      conversationId = "demo-conv-1";
+
+      const convId = `conv-sub-${sub.id}`;
+      const contactId = `contact-sub-${sub.id}`;
+
+      // 1. Find or create mock contact
+      let mockContact = MOCK_CONTACTS.find(
+        (c) => c.id === contactId || c.phone === recipientPhone || (cleanPhoneNoPlus && c.phone_normalized === cleanPhoneNoPlus)
+      );
+      if (!mockContact) {
+        mockContact = {
+          id: contactId,
+          user_id: MOCK_USER_ID,
+          account_id: MOCK_ACCOUNT_ID,
+          phone: recipientPhone,
+          phone_normalized: cleanPhoneNoPlus,
+          name: sub.owner_name || sub.name,
+          email: sub.owner_email && sub.owner_email !== "No email" ? sub.owner_email : "",
+          company: sub.name,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          tags: [],
+        };
+        MOCK_CONTACTS.unshift(mockContact);
+      } else {
+        mockContact.name = sub.owner_name || sub.name;
+        mockContact.phone = recipientPhone;
+        mockContact.company = sub.name;
+      }
+
+      // 2. Find or create mock conversation
+      let mockConv = MOCK_CONVERSATIONS.find((c) => c.id === convId || c.contact_id === mockContact!.id);
+      if (mockConv) {
+        mockConv.last_message_text = messageText;
+        mockConv.last_message_at = new Date().toISOString();
+        mockConv.status = "open";
+        mockConv.contact = mockContact;
+        // Move to top of list so it is immediately visible
+        const idx = MOCK_CONVERSATIONS.indexOf(mockConv);
+        if (idx > 0) {
+          MOCK_CONVERSATIONS.splice(idx, 1);
+          MOCK_CONVERSATIONS.unshift(mockConv);
+        }
+      } else {
+        mockConv = {
+          id: convId,
+          user_id: MOCK_USER_ID,
+          contact_id: mockContact.id,
+          status: "open",
+          last_message_text: messageText,
+          last_message_at: new Date().toISOString(),
+          unread_count: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          contact: mockContact,
+        };
+        MOCK_CONVERSATIONS.unshift(mockConv);
+      }
+      conversationId = mockConv.id;
+
+      // 3. Add outbound message to MOCK_MESSAGES
+      if (!MOCK_MESSAGES[mockConv.id]) {
+        MOCK_MESSAGES[mockConv.id] = [];
+      }
+      const newMsg = {
+        id: `msg-${Date.now()}`,
+        conversation_id: mockConv.id,
+        sender_type: "agent",
+        content_type: "text",
+        content_text: messageText,
+        created_at: new Date().toISOString(),
+        status: "delivered",
+      };
+      MOCK_MESSAGES[mockConv.id].push(newMsg);
     }
 
     return NextResponse.json({
@@ -307,6 +401,16 @@ export async function POST(
       inboxUrl: conversationId ? `/inbox?c=${conversationId}` : "/inbox",
       directWhatsAppUrl,
       last_reminder_sent_at: new Date().toISOString(),
+      mockData: isDemo && sub ? {
+        contact: MOCK_CONTACTS.find((c) => c.phone === recipientPhone) || {
+          id: `contact-sub-${sub.id}`,
+          name: sub.owner_name || sub.name,
+          phone: recipientPhone,
+          company: sub.name,
+        },
+        conversation: MOCK_CONVERSATIONS.find((c) => c.id === conversationId),
+        message: MOCK_MESSAGES[conversationId!]?.[MOCK_MESSAGES[conversationId!].length - 1],
+      } : undefined,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to send reminder" }, { status: 500 });
