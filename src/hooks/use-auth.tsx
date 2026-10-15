@@ -444,8 +444,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSuperAdmin: Boolean(
         profile?.is_super_admin ||
         profile?.role === "super_admin" ||
+        role === "owner" ||
         (user?.email &&
-          process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS?.split(",")
+          (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS ||
+           process.env.SUPER_ADMIN_EMAILS)?.split(",")
             .map((e) => e.trim().toLowerCase())
             .includes(user.email.toLowerCase())) ||
         process.env.NEXT_PUBLIC_DEMO_MODE === "true"

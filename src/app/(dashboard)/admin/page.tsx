@@ -65,7 +65,7 @@ interface PlatformSettings {
 }
 
 export default function AdminCrmPage() {
-  const { isSuperAdmin, loading: authLoading } = useAuth();
+  const { isSuperAdmin, isOwner, loading: authLoading } = useAuth();
   const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -286,7 +286,7 @@ export default function AdminCrmPage() {
     return sub.subscription_status === statusFilter;
   });
 
-  if (!authLoading && !isSuperAdmin) {
+  if (!authLoading && !isSuperAdmin && !isOwner) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 max-w-lg mx-auto">
         <div className="h-14 w-14 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive flex items-center justify-center mb-4">

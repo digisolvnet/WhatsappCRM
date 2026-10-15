@@ -46,13 +46,15 @@ export async function GET(request: Request) {
 
     // Verify Super Admin access
     let isDbSuperAdmin = false;
+    let isOwner = false;
     try {
       const { data: pRole } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, account_role")
         .eq("user_id", user.id)
         .maybeSingle();
       if (pRole?.role === "super_admin") isDbSuperAdmin = true;
+      if (pRole?.account_role === "owner" || pRole?.role === "owner") isOwner = true;
 
       const { data: pAdmin } = await supabase
         .from("profiles")
@@ -68,6 +70,7 @@ export async function GET(request: Request) {
     const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
     const isSuperAdmin =
       isDbSuperAdmin ||
+      isOwner ||
       (user.email && allowedEmails.includes(user.email.toLowerCase()));
 
     if (!isSuperAdmin) {
