@@ -19,13 +19,14 @@ export async function POST(
     let sub: any = null;
     let template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
     let defaultPayLink = MOCK_PLATFORM_SETTINGS.default_payment_link;
+    let dbClient: any = null;
 
     if (isDemo) {
       sub = MOCK_SUBSCRIBERS.find((s) => s.id === id);
     } else {
       const supabase = await createClient();
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      const dbClient = serviceKey
+      dbClient = serviceKey
         ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
             auth: { autoRefreshToken: false, persistSession: false },
           })
@@ -52,7 +53,7 @@ export async function POST(
       }
 
       // Fetch global reminder settings
-      const { data: settings } = await supabase
+      const { data: settings } = await dbClient
         .from("platform_billing_settings")
         .select("*")
         .eq("id", "default")
@@ -105,10 +106,9 @@ export async function POST(
     let sentViaApi = false;
     let apiError: string | null = null;
 
-    if (!isDemo) {
-      const supabase = await createClient();
+    if (!isDemo && dbClient) {
       // Look up super admin's whatsapp config to send automated API message
-      const { data: whatsappConfigs } = await supabase
+      const { data: whatsappConfigs } = await dbClient
         .from("whatsapp_config")
         .select("*")
         .eq("status", "connected")
