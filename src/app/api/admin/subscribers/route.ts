@@ -67,7 +67,7 @@ export async function GET(request: Request) {
       // Column might not exist yet before migration
     }
 
-    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "annugarg33@gmail.com";
+    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "support@digisolvnet.com";
     const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
     const isSuperAdmin =
       isDbSuperAdmin ||
@@ -77,20 +77,57 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Forbidden: Super Admin access required" }, { status: 403 });
     }
 
+    // Initialize service client if service key exists so Super Admin can see ALL accounts bypassing RLS!
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const dbClient = serviceKey
+      ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
     // Fetch all accounts
-    const { data: accounts, error: accountsError } = await supabase
+    let accounts: any[] = [];
+    const { data: accData, error: accountsError } = await dbClient
       .from("accounts")
       .select("*, profiles!profiles_account_id_fkey(full_name, email, role)")
       .order("created_at", { ascending: false });
 
-    if (accountsError) {
-      return NextResponse.json({ error: accountsError.message }, { status: 500 });
+    if (!accountsError && accData) {
+      accounts = accData;
+    } else {
+      // Fallback query if relationship embed has schema cache issue
+      const { data: rawAccs } = await dbClient
+        .from("accounts")
+        .select("*")
+        .order("created_at", { ascending: false });
+      accounts = rawAccs || [];
+    }
+
+    // Fetch profiles map to guarantee owner details are always present for all accounts
+    const accountIds = accounts.map((a: any) => a.id).filter(Boolean);
+    let profilesByAccount: Record<string, any> = {};
+    if (accountIds.length > 0) {
+      try {
+        const { data: profs } = await dbClient
+          .from("profiles")
+          .select("account_id, full_name, email, role")
+          .in("account_id", accountIds);
+        (profs || []).forEach((p: any) => {
+          if (p.account_id && (!profilesByAccount[p.account_id] || p.role === "owner")) {
+            profilesByAccount[p.account_id] = p;
+          }
+        });
+      } catch {}
     }
 
     const subscribers = (accounts || []).map((acc: any) => {
-      const owner = Array.isArray(acc.profiles)
+      let owner = Array.isArray(acc.profiles)
         ? acc.profiles.find((p: any) => p.role === "owner") || acc.profiles[0]
         : null;
+
+      if (!owner && profilesByAccount[acc.id]) {
+        owner = profilesByAccount[acc.id];
+      }
 
       return {
         id: acc.id,
@@ -246,7 +283,7 @@ export async function POST(request: Request) {
       if (pAdmin?.is_super_admin) isDbSuperAdmin = true;
     } catch {}
 
-    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "annugarg33@gmail.com";
+    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "support@digisolvnet.com";
     const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
     const isSuperAdmin =
       isDbSuperAdmin ||

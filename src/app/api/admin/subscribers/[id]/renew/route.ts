@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { MOCK_SUBSCRIBERS, MOCK_SUBSCRIPTION_PAYMENTS } from "@/lib/mock/data";
 
 export async function POST(
@@ -69,7 +70,14 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: account, error: accError } = await supabase
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const dbClient = serviceKey
+      ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
+    const { data: account, error: accError } = await dbClient
       .from("accounts")
       .select("*")
       .eq("id", id)
@@ -86,7 +94,7 @@ export async function POST(
     const newExpiry = new Date(baseDate.getTime() + daysToAdd * 24 * 3600 * 1000);
 
     // Update account validity & status
-    const { data: updatedAccount, error: updateError } = await supabase
+    const { data: updatedAccount, error: updateError } = await dbClient
       .from("accounts")
       .update({
         subscription_status: "active",
@@ -104,7 +112,7 @@ export async function POST(
     }
 
     // Insert payment record
-    await supabase.from("subscription_payments").insert({
+    await dbClient.from("subscription_payments").insert({
       account_id: id,
       amount: amount || account.monthly_price,
       currency: account.currency || "USD",

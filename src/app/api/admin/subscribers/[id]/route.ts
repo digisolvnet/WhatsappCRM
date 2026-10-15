@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { MOCK_SUBSCRIBERS } from "@/lib/mock/data";
 
 export async function PATCH(
@@ -65,7 +66,14 @@ export async function PATCH(
     if (notes !== undefined) updates.notes = notes;
     if (auto_reminder_enabled !== undefined) updates.auto_reminder_enabled = auto_reminder_enabled;
 
-    const { data: updated, error: updateError } = await supabase
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const dbClient = serviceKey
+      ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
+    const { data: updated, error: updateError } = await dbClient
       .from("accounts")
       .update(updates)
       .eq("id", id)
@@ -126,7 +134,7 @@ export async function DELETE(
       if (pAdmin?.is_super_admin) isDbSuperAdmin = true;
     } catch {}
 
-    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "annugarg33@gmail.com";
+    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "support@digisolvnet.com";
     const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
     const isSuperAdmin =
       isDbSuperAdmin ||
@@ -136,7 +144,14 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden: Super Admin access required" }, { status: 403 });
     }
 
-    const { error: delError } = await supabase
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const dbClient = serviceKey
+      ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
+    const { error: delError } = await dbClient
       .from("accounts")
       .delete()
       .eq("id", id);

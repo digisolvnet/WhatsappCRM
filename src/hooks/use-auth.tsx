@@ -447,7 +447,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (user?.email &&
           (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS ||
            process.env.SUPER_ADMIN_EMAILS ||
-           "annugarg33@gmail.com")
+           "support@digisolvnet.com")
             ?.split(",")
             .map((e) => e.trim().toLowerCase())
             .includes(user.email.toLowerCase())) ||
