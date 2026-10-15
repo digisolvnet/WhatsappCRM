@@ -442,16 +442,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canEditSettings: role ? canEditSettingsFor(role) : false,
       canSendMessages: role ? canSendMessagesFor(role) : false,
       isSuperAdmin: Boolean(
-        profile?.is_super_admin ||
-        profile?.role === "super_admin" ||
-        (user?.email &&
-          (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS ||
-           process.env.SUPER_ADMIN_EMAILS ||
-           "support@digisolvnet.com")
-            ?.split(",")
-            .map((e) => e.trim().toLowerCase())
-            .includes(user.email.toLowerCase())) ||
-        process.env.NEXT_PUBLIC_DEMO_MODE === "true"
+        user?.email &&
+        (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS ||
+         process.env.SUPER_ADMIN_EMAILS ||
+         "support@digisolvnet.com")
+          ?.split(",")
+          .map((e) => e.trim().toLowerCase())
+          .includes(user.email.toLowerCase())
       ),
     };
   }, [profile?.account_role, profile?.account_id, profile?.is_super_admin, profile?.role, user?.email]);

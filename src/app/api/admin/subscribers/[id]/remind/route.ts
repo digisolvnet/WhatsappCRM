@@ -11,7 +11,9 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     let sub: any = null;
     let template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
@@ -21,20 +23,30 @@ export async function POST(
       sub = MOCK_SUBSCRIBERS.find((s) => s.id === id);
     } else {
       const supabase = await createClient();
-      const { data: account } = await supabase
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const dbClient = serviceKey
+        ? createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+            auth: { autoRefreshToken: false, persistSession: false },
+          })
+        : supabase;
+
+      const { data: account } = await dbClient
         .from("accounts")
-        .select("*, profiles!profiles_account_id_fkey(full_name, email, role)")
+        .select("*")
         .eq("id", id)
-        .single();
+        .maybeSingle();
 
       if (account) {
-        const owner = Array.isArray(account.profiles)
-          ? account.profiles.find((p: any) => p.role === "owner") || account.profiles[0]
-          : null;
+        const { data: profs } = await dbClient
+          .from("profiles")
+          .select("full_name, email, role, account_role")
+          .eq("account_id", id);
+
+        const owner = (profs || []).find((p: any) => p.account_role === "owner" || p.role === "owner") || profs?.[0];
         sub = {
           ...account,
-          owner_name: owner?.full_name || "Admin",
-          owner_email: account.billing_email || owner?.email,
+          owner_name: owner?.full_name || "Customer",
+          owner_email: account.billing_email || owner?.email || "No email",
         };
       }
 
@@ -118,7 +130,7 @@ export async function POST(
       }
 
       // Update last_reminder_sent_at on account
-      await supabase
+      await dbClient
         .from("accounts")
         .update({
           last_reminder_sent_at: new Date().toISOString(),

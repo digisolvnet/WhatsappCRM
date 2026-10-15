@@ -10,7 +10,9 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     const {
       subscription_status,
@@ -96,7 +98,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     if (isDemo) {
       const idx = MOCK_SUBSCRIBERS.findIndex((s) => s.id === id);

@@ -19,6 +19,10 @@ ALTER TABLE accounts
   ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0;
 
+-- Index for expiring/due subscriptions
+CREATE INDEX IF NOT EXISTS idx_accounts_subscription_expiry
+  ON accounts (subscription_status, current_period_ends_at);
+
 -- STEP 2: Add `is_super_admin` flag to `profiles` table
 ALTER TABLE profiles 
   ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN NOT NULL DEFAULT FALSE;
@@ -39,6 +43,11 @@ CREATE TABLE IF NOT EXISTS subscription_payments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_sub_payments_account
+  ON subscription_payments (account_id, created_at DESC);
+
+ALTER TABLE subscription_payments ENABLE ROW LEVEL SECURITY;
+
 -- STEP 4: Create platform_billing_settings table if missing
 CREATE TABLE IF NOT EXISTS platform_billing_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
@@ -56,6 +65,8 @@ INSERT INTO platform_billing_settings (id)
 VALUES ('default')
 ON CONFLICT (id) DO NOTHING;
 
+ALTER TABLE platform_billing_settings ENABLE ROW LEVEL SECURITY;
+
 -- STEP 5: Smart Account Transfer to support@digisolvnet.com
 DO $$
 DECLARE
@@ -63,15 +74,15 @@ DECLARE
   v_new_user_id UUID;
   v_account_id UUID;
 BEGIN
-  SELECT id INTO v_old_user_id FROM auth.users WHERE email = 'developer.aniketgarg@gmail.com';
-  SELECT id INTO v_new_user_id FROM auth.users WHERE email = 'support@digisolvnet.com';
+  SELECT id INTO v_old_user_id FROM auth.users WHERE LOWER(email) = 'developer.aniketgarg@gmail.com' LIMIT 1;
+  SELECT id INTO v_new_user_id FROM auth.users WHERE LOWER(email) = 'support@digisolvnet.com' LIMIT 1;
 
   -- Case A: support@digisolvnet.com already registered
   IF v_new_user_id IS NOT NULL THEN
     IF v_old_user_id IS NOT NULL THEN
-      SELECT account_id INTO v_account_id FROM profiles WHERE user_id = v_old_user_id;
+      SELECT account_id INTO v_account_id FROM profiles WHERE user_id = v_old_user_id LIMIT 1;
       IF v_account_id IS NOT NULL THEN
-        UPDATE profiles SET account_id = v_account_id, account_role = 'owner' WHERE user_id = v_new_user_id;
+        UPDATE profiles SET account_id = v_account_id, account_role = 'owner', is_super_admin = TRUE, role = 'super_admin' WHERE user_id = v_new_user_id;
         EXECUTE 'UPDATE accounts SET billing_email = ''support@digisolvnet.com'' WHERE id = $1' USING v_account_id;
       END IF;
       UPDATE profiles SET is_super_admin = FALSE, role = 'user' WHERE user_id = v_old_user_id;
@@ -81,17 +92,28 @@ BEGIN
 
   -- Case B: support@digisolvnet.com has not registered yet, rename the existing developer account directly
   ELSIF v_old_user_id IS NOT NULL THEN
+    -- Update auth.users
     UPDATE auth.users
     SET email = 'support@digisolvnet.com',
         email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
         raw_user_meta_data = jsonb_set(COALESCE(raw_user_meta_data, '{}'::jsonb), '{email}', '"support@digisolvnet.com"')
     WHERE id = v_old_user_id;
 
+    -- Update auth.identities if exists
+    BEGIN
+      UPDATE auth.identities
+      SET identity_data = jsonb_set(COALESCE(identity_data, '{}'::jsonb), '{email}', '"support@digisolvnet.com"')
+      WHERE user_id = v_old_user_id;
+    EXCEPTION WHEN OTHERS THEN
+      -- table or structure differences handled gracefully
+    END;
+
+    -- Update profiles
     UPDATE profiles
     SET email = 'support@digisolvnet.com', is_super_admin = TRUE, role = 'super_admin'
     WHERE user_id = v_old_user_id;
 
-    SELECT account_id INTO v_account_id FROM profiles WHERE user_id = v_old_user_id;
+    SELECT account_id INTO v_account_id FROM profiles WHERE user_id = v_old_user_id LIMIT 1;
     IF v_account_id IS NOT NULL THEN
       EXECUTE 'UPDATE accounts SET billing_email = ''support@digisolvnet.com'' WHERE id = $1' USING v_account_id;
     END IF;
@@ -100,40 +122,100 @@ BEGIN
   -- Demote any other emails
   UPDATE profiles
   SET is_super_admin = FALSE
-  WHERE email IN ('annugarg33@gmail.com', 'developer.aniketgarg@gmail.com')
-    AND email <> 'support@digisolvnet.com';
+  WHERE LOWER(email) NOT IN ('support@digisolvnet.com')
+    AND is_super_admin = TRUE;
 END $$;
 
 -- STEP 6: Super Admin RLS Policies (Allows Super Admin to view and manage ALL accounts & profiles)
 DROP POLICY IF EXISTS "Super admins can view all accounts" ON accounts;
 CREATE POLICY "Super admins can view all accounts" ON accounts
   FOR SELECT
+  TO authenticated
   USING (
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR profiles.email = 'support@digisolvnet.com')
+        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
     )
   );
 
 DROP POLICY IF EXISTS "Super admins can update all accounts" ON accounts;
 CREATE POLICY "Super admins can update all accounts" ON accounts
   FOR UPDATE
+  TO authenticated
   USING (
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR profiles.email = 'support@digisolvnet.com')
+        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
+    )
+  );
+
+DROP POLICY IF EXISTS "Super admins can insert accounts" ON accounts;
+CREATE POLICY "Super admins can insert accounts" ON accounts
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.user_id = auth.uid()
+        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
     )
   );
 
 DROP POLICY IF EXISTS "Super admins can view all profiles" ON profiles;
 CREATE POLICY "Super admins can view all profiles" ON profiles
   FOR SELECT
+  TO authenticated
   USING (
     EXISTS (
       SELECT 1 FROM profiles p2
       WHERE p2.user_id = auth.uid()
-        AND (p2.is_super_admin = TRUE OR p2.role = 'super_admin' OR p2.email = 'support@digisolvnet.com')
+        AND (p2.is_super_admin = TRUE OR p2.role = 'super_admin' OR LOWER(p2.email) = 'support@digisolvnet.com')
+    )
+  );
+
+DROP POLICY IF EXISTS "Super admins can update all profiles" ON profiles;
+CREATE POLICY "Super admins can update all profiles" ON profiles
+  FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles p2
+      WHERE p2.user_id = auth.uid()
+        AND (p2.is_super_admin = TRUE OR p2.role = 'super_admin' OR LOWER(p2.email) = 'support@digisolvnet.com')
+    )
+  );
+
+DROP POLICY IF EXISTS "Super admins can manage subscription payments" ON subscription_payments;
+CREATE POLICY "Super admins can manage subscription payments"
+  ON subscription_payments
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.user_id = auth.uid()
+        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
+    )
+  );
+
+DROP POLICY IF EXISTS "Anyone can read platform settings" ON platform_billing_settings;
+CREATE POLICY "Anyone can read platform settings"
+  ON platform_billing_settings
+  FOR SELECT
+  TO authenticated
+  USING (TRUE);
+
+DROP POLICY IF EXISTS "Only super admins can update platform settings" ON platform_billing_settings;
+CREATE POLICY "Only super admins can update platform settings"
+  ON platform_billing_settings
+  FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.user_id = auth.uid()
+        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
     )
   );

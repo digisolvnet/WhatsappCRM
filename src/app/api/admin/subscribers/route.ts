@@ -5,7 +5,9 @@ import { MOCK_SUBSCRIBERS, MOCK_SUBSCRIPTION_PAYMENTS } from "@/lib/mock/data";
 
 export async function GET(request: Request) {
   try {
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     if (isDemo) {
       // Calculate SaaS MRR and stats from mock subscribers
@@ -173,7 +175,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
     const body = await request.json();
     const {
       name,

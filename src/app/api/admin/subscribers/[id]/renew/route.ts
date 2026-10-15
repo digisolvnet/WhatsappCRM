@@ -16,7 +16,9 @@ export async function POST(
     const referenceId = body.referenceId || `ref_${Date.now()}`;
     const notes = body.notes || "Subscription renewed by Super Admin";
 
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     if (isDemo) {
       const sub = MOCK_SUBSCRIBERS.find((s) => s.id === id);

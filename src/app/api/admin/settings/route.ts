@@ -4,7 +4,9 @@ import { MOCK_PLATFORM_SETTINGS } from "@/lib/mock/data";
 
 export async function GET() {
   try {
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
     if (isDemo) {
       return NextResponse.json({ settings: MOCK_PLATFORM_SETTINGS });
     }
@@ -25,7 +27,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+    const isDemo =
+      process.env.NEXT_PUBLIC_DEMO_MODE === "true" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.includes("placeholder-project");
 
     const {
       default_monthly_price,
