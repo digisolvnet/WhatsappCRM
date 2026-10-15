@@ -45,17 +45,29 @@ export async function GET(request: Request) {
     }
 
     // Verify Super Admin access
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("is_super_admin, role")
-      .eq("user_id", user.id)
-      .single();
+    let isDbSuperAdmin = false;
+    try {
+      const { data: pRole } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (pRole?.role === "super_admin") isDbSuperAdmin = true;
+
+      const { data: pAdmin } = await supabase
+        .from("profiles")
+        .select("is_super_admin")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (pAdmin?.is_super_admin) isDbSuperAdmin = true;
+    } catch {
+      // Column might not exist yet before migration
+    }
 
     const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS;
     const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
     const isSuperAdmin =
-      profile?.is_super_admin ||
-      profile?.role === "super_admin" ||
+      isDbSuperAdmin ||
       (user.email && allowedEmails.includes(user.email.toLowerCase()));
 
     if (!isSuperAdmin) {

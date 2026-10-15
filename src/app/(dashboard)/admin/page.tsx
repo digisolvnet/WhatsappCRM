@@ -286,6 +286,32 @@ export default function AdminCrmPage() {
     return sub.subscription_status === statusFilter;
   });
 
+  if (!authLoading && !isSuperAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 max-w-lg mx-auto">
+        <div className="h-14 w-14 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive flex items-center justify-center mb-4">
+          <ShieldCheck className="h-7 w-7 text-destructive" />
+        </div>
+        <h2 className="text-xl font-bold text-foreground">Super Admin Access Required</h2>
+        <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+          This portal is reserved for Platform Super Administrators to manage tenant subscriptions, billing, and automated reminders.
+        </p>
+        <div className="mt-5 rounded-xl border border-border bg-card p-4 text-left w-full text-xs text-muted-foreground space-y-2">
+          <p className="font-semibold text-foreground">How to grant Super Admin access:</p>
+          <p>
+            1. Add your login email to <code className="bg-muted px-1.5 py-0.5 rounded text-primary">SUPER_ADMIN_EMAILS</code> in Vercel project environment variables.
+          </p>
+          <p>
+            2. Or run this in Supabase SQL Editor:
+          </p>
+          <pre className="bg-muted p-2 rounded text-[11px] overflow-x-auto text-foreground">
+{`UPDATE profiles SET is_super_admin = TRUE WHERE email = 'your-email@domain.com';`}
+          </pre>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 space-y-6 p-6 lg:p-8 max-w-7xl mx-auto">
       {/* Page Header */}

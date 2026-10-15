@@ -194,13 +194,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       let data: ProfileRow | null = null;
       for (let attempt = 1; ; attempt++) {
-        const result = await supabase
+        let result = await supabase
           .from("profiles")
           .select(
             "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, is_super_admin",
           )
           .eq("user_id", userId)
           .maybeSingle();
+
+        // If the is_super_admin column doesn't exist yet on the profiles table in Supabase,
+        // seamlessly fall back to selecting without it so user permissions never crash.
+        if (
+          result.error &&
+          (result.error.message?.includes("is_super_admin") ||
+            result.error.code === "42703")
+        ) {
+          result = await supabase
+            .from("profiles")
+            .select(
+              "id, full_name, email, avatar_url, role, beta_features, account_id, account_role",
+            )
+            .eq("user_id", userId)
+            .maybeSingle();
+        }
 
         if (!result.error) {
           data = result.data;
@@ -428,7 +444,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSuperAdmin: Boolean(
         profile?.is_super_admin ||
         profile?.role === "super_admin" ||
-        (user?.email && process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS?.split(",").map(e => e.trim()).includes(user.email)) ||
+        (user?.email &&
+          process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS?.split(",")
+            .map((e) => e.trim().toLowerCase())
+            .includes(user.email.toLowerCase())) ||
         process.env.NEXT_PUBLIC_DEMO_MODE === "true"
       ),
     };
