@@ -24,6 +24,11 @@ import {
   ChevronRight,
   Filter,
   ArrowUpRight,
+  Trash2,
+  Copy,
+  Check,
+  UserPlus,
+  Key,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -87,6 +92,35 @@ export default function AdminCrmPage() {
 
   const [editingSub, setEditingSub] = useState<Subscriber | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Create Customer Dialog State
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+  } | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({
+    name: "",
+    owner_name: "",
+    owner_email: "",
+    password: "Pass@" + Math.floor(1000 + Math.random() * 9000),
+    billing_phone: "",
+    plan_name: "Monthly Pro",
+    monthly_price: 999,
+    currency: "INR",
+    subscription_status: "active" as "active" | "trial",
+    duration_days: 30,
+    payment_link: "",
+    notes: "",
+  });
+
+  // Delete Customer State
+  const [deletingSub, setDeletingSub] = useState<Subscriber | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Platform Settings State
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
@@ -226,6 +260,86 @@ export default function AdminCrmPage() {
     }
   };
 
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomer.name || !newCustomer.owner_email) {
+      toast.error("Please enter Business name and Customer email");
+      return;
+    }
+    setIsCreatingCustomer(true);
+    try {
+      const res = await fetch("/api/admin/subscribers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCustomer),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || "Customer account created successfully!");
+        setCreatedCredentials({
+          name: newCustomer.name,
+          email: data.credentials?.email || newCustomer.owner_email,
+          password: data.credentials?.password || newCustomer.password,
+          phone: newCustomer.billing_phone,
+        });
+        setIsCreateModalOpen(false);
+        // Reset form
+        setNewCustomer({
+          name: "",
+          owner_name: "",
+          owner_email: "",
+          password: "Pass@" + Math.floor(1000 + Math.random() * 9000),
+          billing_phone: "",
+          plan_name: "Monthly Pro",
+          monthly_price: settings?.default_monthly_price || 999,
+          currency: settings?.default_currency || "INR",
+          subscription_status: "active",
+          duration_days: 30,
+          payment_link: settings?.default_payment_link || "",
+          notes: "",
+        });
+        loadData();
+      } else {
+        toast.error(data.error || "Failed to create customer");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Network error while creating customer");
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
+  const handleDeleteSubscriber = async () => {
+    if (!deletingSub) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/subscribers/${deletingSub.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || "Customer deleted successfully");
+        setDeletingSub(null);
+        loadData();
+      } else {
+        toast.error(data.error || "Failed to delete customer");
+      }
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleCopyCredentials = () => {
+    if (!createdCredentials) return;
+    const text = `🎉 Welcome to WhatsApp CRM!\nHere are your login credentials:\n\n🌐 Login URL: ${window.location.origin}/login\n📧 Email: ${createdCredentials.email}\n🔑 Password: ${createdCredentials.password}\n\nPlease login and start connecting your WhatsApp!`;
+    navigator.clipboard.writeText(text);
+    setCopiedKey(true);
+    toast.success("Login details copied to clipboard!");
+    setTimeout(() => setCopiedKey(false), 3000);
+  };
+
   const handleSaveSettings = async () => {
     if (!settings) return;
     setIsSavingSettings(true);
@@ -286,7 +400,7 @@ export default function AdminCrmPage() {
     return sub.subscription_status === statusFilter;
   });
 
-  if (!authLoading && !isSuperAdmin && !isOwner) {
+  if (!authLoading && !isSuperAdmin) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 max-w-lg mx-auto">
         <div className="h-14 w-14 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive flex items-center justify-center mb-4">
@@ -431,20 +545,30 @@ export default function AdminCrmPage() {
       {/* Tab 1: Subscribers List */}
       {activeTab === "subscribers" && (
         <div className="space-y-4">
-          {/* Search & Filters */}
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search business, owner, phone..."
-                className="w-full rounded-lg border border-border bg-card pl-9 pr-4 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
+          {/* Action Header & Search */}
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 text-xs font-semibold shadow-sm transition-colors shrink-0"
+              >
+                <UserPlus className="h-4 w-4" />
+                + Create Customer
+              </button>
+
+              <div className="relative flex-1 sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search business, owner, phone..."
+                  className="w-full rounded-lg border border-border bg-card pl-9 pr-4 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
               {[
                 { id: "all", label: "All" },
                 { id: "active", label: "Active" },
@@ -611,6 +735,15 @@ export default function AdminCrmPage() {
                               title={sub.subscription_status === "active" ? "Suspend access" : "Activate access"}
                             >
                               {sub.subscription_status === "active" ? "Suspend" : "Activate"}
+                            </button>
+
+                            {/* Delete Customer */}
+                            <button
+                              onClick={() => setDeletingSub(sub)}
+                              className="inline-flex items-center rounded p-1 text-xs border border-border text-muted-foreground hover:text-rose-400 hover:border-rose-500/30 transition-colors"
+                              title="Delete customer account"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </td>
                         </tr>
@@ -1048,6 +1181,351 @@ export default function AdminCrmPage() {
                 className="flex-1 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground"
               >
                 {isSavingEdit ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE CUSTOMER MODAL */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-emerald-500" />
+                Create Customer Account & Subscription
+              </h3>
+              <button
+                onClick={() => setIsCreateModalOpen(false)}
+                className="text-muted-foreground hover:text-foreground text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCustomer} className="space-y-4 text-xs">
+              {/* Business & Owner Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">
+                    Business / Client Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newCustomer.name}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                    placeholder="e.g. Acme Enterprises"
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">
+                    Owner Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomer.owner_name}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, owner_name: e.target.value })}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Login Credentials */}
+              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+                <p className="font-semibold text-foreground flex items-center gap-1.5 text-[11px]">
+                  <Key className="h-3.5 w-3.5 text-primary" />
+                  Client Login Credentials
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-muted-foreground mb-1 font-medium">
+                      Login Email *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={newCustomer.owner_email}
+                      onChange={(e) => setNewCustomer({ ...newCustomer, owner_email: e.target.value })}
+                      placeholder="client@company.com"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-foreground text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-muted-foreground mb-1 font-medium">
+                      Initial Password *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newCustomer.password}
+                      onChange={(e) => setNewCustomer({ ...newCustomer, password: e.target.value })}
+                      placeholder="e.g. Pass@1234"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-foreground text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* WhatsApp Phone & Plan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">
+                    WhatsApp Phone (with Country Code)
+                  </label>
+                  <input
+                    type="text"
+                    value={newCustomer.billing_phone}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, billing_phone: e.target.value })}
+                    placeholder="+919876543210"
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">Plan Name</label>
+                  <select
+                    value={newCustomer.plan_name}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, plan_name: e.target.value })}
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                  >
+                    <option value="Monthly Pro">Monthly Pro</option>
+                    <option value="Starter">Starter Plan</option>
+                    <option value="Business Plus">Business Plus</option>
+                    <option value="Enterprise">Enterprise</option>
+                    <option value="Custom Plan">Custom Plan</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Price, Currency, Duration */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">Fee</label>
+                  <input
+                    type="number"
+                    value={newCustomer.monthly_price}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, monthly_price: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">Currency</label>
+                  <select
+                    value={newCustomer.currency}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, currency: e.target.value })}
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                  >
+                    <option value="INR">INR (₹)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="GBP">GBP (£)</option>
+                    <option value="AED">AED</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-muted-foreground mb-1 font-medium">Validity</label>
+                  <select
+                    value={newCustomer.duration_days}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, duration_days: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs font-medium"
+                  >
+                    <option value={14}>14 Days (Trial)</option>
+                    <option value={30}>30 Days (1 Month)</option>
+                    <option value={60}>60 Days (2 Months)</option>
+                    <option value={90}>90 Days (3 Months)</option>
+                    <option value={180}>180 Days (6 Months)</option>
+                    <option value={365}>365 Days (1 Year)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-muted-foreground mb-1 font-medium">Initial Status</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="subscription_status"
+                      value="active"
+                      checked={newCustomer.subscription_status === "active"}
+                      onChange={() => setNewCustomer({ ...newCustomer, subscription_status: "active" })}
+                      className="text-emerald-500"
+                    />
+                    <span className="text-foreground">Active (Payment Received)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="subscription_status"
+                      value="trial"
+                      checked={newCustomer.subscription_status === "trial"}
+                      onChange={() => setNewCustomer({ ...newCustomer, subscription_status: "trial" })}
+                      className="text-primary"
+                    />
+                    <span className="text-foreground">Free Trial</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Payment Link & Notes */}
+              <div>
+                <label className="block text-muted-foreground mb-1 font-medium">
+                  Custom Payment Link (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newCustomer.payment_link}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, payment_link: e.target.value })}
+                  placeholder="https://rzp.io/l/... or UPI link"
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-muted-foreground mb-1 font-medium">Notes (Internal)</label>
+                <input
+                  type="text"
+                  value={newCustomer.notes}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, notes: e.target.value })}
+                  placeholder="e.g. Paid via GPay, Ref #9812..."
+                  className="w-full rounded-lg border border-border bg-muted/40 px-3 py-2 text-foreground text-xs"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-border">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="flex-1 rounded-lg border border-border bg-muted py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingCustomer}
+                  className="flex-1 rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                >
+                  {isCreatingCustomer ? "Creating Account..." : "Create & Activate Customer"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREDENTIALS SUCCESS MODAL */}
+      {createdCredentials && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                Customer Account Created!
+              </h3>
+              <button
+                onClick={() => setCreatedCredentials(null)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2.5 text-xs">
+              <p className="text-muted-foreground text-[11px]">
+                Share these login details with <strong className="text-foreground">{createdCredentials.name}</strong>:
+              </p>
+              <div className="flex justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">Portal URL:</span>
+                <span className="font-mono text-primary">{typeof window !== "undefined" ? window.location.origin : ""}/login</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">Login Email:</span>
+                <span className="font-mono text-foreground font-semibold">{createdCredentials.email}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">Password:</span>
+                <span className="font-mono text-emerald-400 font-bold bg-muted px-2 py-0.5 rounded">{createdCredentials.password}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleCopyCredentials}
+                className="flex items-center justify-center gap-2 rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                {copiedKey ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copiedKey ? "Copied!" : "Copy Login Credentials"}
+              </button>
+
+              {createdCredentials.phone && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const msg = encodeURIComponent(
+                      `🎉 Welcome to WhatsApp CRM!\nHere are your account login details:\n\n🌐 Portal: ${window.location.origin}/login\n📧 Email: ${createdCredentials.email}\n🔑 Password: ${createdCredentials.password}\n\nPlease login to start messaging your customers!`
+                    );
+                    window.open(
+                      `https://wa.me/${createdCredentials.phone.replace(/[^\d]/g, "")}?text=${msg}`,
+                      "_blank"
+                    );
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 border border-emerald-500/30 py-2 text-xs font-semibold transition-colors"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Send Credentials via WhatsApp
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setCreatedCredentials(null)}
+                className="rounded-lg border border-border bg-muted py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CUSTOMER MODAL */}
+      {deletingSub && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-rose-500/15 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground text-sm">Delete Customer Account</h3>
+                <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-foreground bg-muted/40 p-3 rounded-lg border border-border">
+              Are you sure you want to delete <strong>{deletingSub.name}</strong> ({deletingSub.owner_email})? Their account and access will be permanently removed.
+            </p>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingSub(null)}
+                className="flex-1 rounded-lg border border-border bg-muted py-2 text-xs font-medium text-muted-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSubscriber}
+                disabled={isDeleting}
+                className="flex-1 rounded-lg bg-rose-600 py-2 text-xs font-semibold text-white hover:bg-rose-500 transition-colors disabled:opacity-50"
+              >
+                {isDeleting ? "Deleting..." : "Confirm Delete"}
               </button>
             </div>
           </div>

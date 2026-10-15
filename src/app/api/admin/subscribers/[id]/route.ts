@@ -81,3 +81,72 @@ export async function PATCH(
     return NextResponse.json({ error: error.message || "Failed to update subscriber" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+    if (isDemo) {
+      const idx = MOCK_SUBSCRIBERS.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        MOCK_SUBSCRIBERS.splice(idx, 1);
+      }
+      return NextResponse.json({ success: true, message: "Customer account deleted" });
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Verify Super Admin access
+    let isDbSuperAdmin = false;
+    try {
+      const { data: pRole } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (pRole?.role === "super_admin") isDbSuperAdmin = true;
+
+      const { data: pAdmin } = await supabase
+        .from("profiles")
+        .select("is_super_admin")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (pAdmin?.is_super_admin) isDbSuperAdmin = true;
+    } catch {}
+
+    const adminEmailsRaw = process.env.SUPER_ADMIN_EMAILS || process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAILS || "annugarg33@gmail.com";
+    const allowedEmails = adminEmailsRaw?.split(",").map((e) => e.trim().toLowerCase()) || [];
+    const isSuperAdmin =
+      isDbSuperAdmin ||
+      (user.email && allowedEmails.includes(user.email.toLowerCase()));
+
+    if (!isSuperAdmin) {
+      return NextResponse.json({ error: "Forbidden: Super Admin access required" }, { status: 403 });
+    }
+
+    const { error: delError } = await supabase
+      .from("accounts")
+      .delete()
+      .eq("id", id);
+
+    if (delError) {
+      return NextResponse.json({ error: delError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, message: "Customer account deleted successfully" });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || "Failed to delete account" }, { status: 500 });
+  }
+}

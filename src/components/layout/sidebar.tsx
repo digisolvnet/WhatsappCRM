@@ -292,7 +292,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               );
             })}
 
-            {(isSuperAdmin || accountRole === "owner") && (
+            {isSuperAdmin && (
               <li key="/admin">
                 <Link
                   href="/admin"
