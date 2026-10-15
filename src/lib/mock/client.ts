@@ -1,6 +1,7 @@
 import {
   MOCK_USER,
   MOCK_PROFILE,
+  MOCK_PROFILES,
   MOCK_ACCOUNT,
   MOCK_ACCOUNT_ID,
   MOCK_USER_ID,
@@ -165,7 +166,7 @@ export function syncMockMessage(msg: any) {
 function getTableData(table: string): any[] {
   switch (table) {
     case "profiles":
-      return [MOCK_PROFILE];
+      return MOCK_PROFILES;
     case "accounts":
       return MOCK_SUBSCRIBERS;
     case "subscription_payments":

@@ -449,3 +449,46 @@ export const MOCK_SUBSCRIPTION_PAYMENTS = [
   },
 ];
 
+export const MOCK_PROFILES = [
+  MOCK_PROFILE,
+  {
+    id: "22222222-2222-2222-2222-222222222223",
+    user_id: "00000000-0000-0000-0000-000000000002",
+    full_name: "Sarah Support",
+    email: "sarah@wacrm.local",
+    avatar_url: null,
+    role: "agent",
+    is_super_admin: false,
+    beta_features: [],
+    account_id: MOCK_ACCOUNT_ID,
+    account_role: "agent",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "22222222-2222-2222-2222-222222222224",
+    user_id: "00000000-0000-0000-0000-000000000003",
+    full_name: "Alex Sales",
+    email: "alex@wacrm.local",
+    avatar_url: null,
+    role: "agent",
+    is_super_admin: false,
+    beta_features: [],
+    account_id: MOCK_ACCOUNT_ID,
+    account_role: "agent",
+    created_at: new Date().toISOString(),
+  },
+  ...MOCK_SUBSCRIBERS.map((sub) => ({
+    id: `prof-${sub.id}`,
+    user_id: `user-${sub.id}`,
+    full_name: sub.owner_name || sub.name,
+    email: sub.owner_email || `${sub.id}@example.com`,
+    avatar_url: null,
+    role: "owner",
+    is_super_admin: false,
+    beta_features: [],
+    account_id: sub.id,
+    account_role: "owner",
+    created_at: new Date().toISOString(),
+  })),
+];
+
