@@ -126,65 +126,86 @@ BEGIN
     AND is_super_admin = TRUE;
 END $$;
 
--- STEP 6: Super Admin RLS Policies (Allows Super Admin to view and manage ALL accounts & profiles)
-DROP POLICY IF EXISTS "Super admins can view all accounts" ON accounts;
-CREATE POLICY "Super admins can view all accounts" ON accounts
+-- STEP 6: Super Admin Helper Function & Non-Recursive RLS Policies
+CREATE OR REPLACE FUNCTION public.is_super_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT 
+    CASE 
+      WHEN LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'support@digisolvnet.com' THEN TRUE
+      ELSE COALESCE(
+        (
+          SELECT (p.is_super_admin = TRUE OR p.role = 'super_admin' OR LOWER(p.email) = 'support@digisolvnet.com')
+          FROM profiles p
+          WHERE p.user_id = auth.uid()
+          LIMIT 1
+        ),
+        FALSE
+      )
+    END;
+$$;
+
+ALTER FUNCTION public.is_super_admin() OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION public.is_super_admin() TO authenticated, service_role, anon;
+
+-- Drop recursive policies on profiles
+DROP POLICY IF EXISTS "Super admins can view all profiles" ON profiles;
+DROP POLICY IF EXISTS "Super admins can update all profiles" ON profiles;
+DROP POLICY IF EXISTS profiles_select ON profiles;
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS profiles_update ON profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+
+CREATE POLICY profiles_select ON profiles
   FOR SELECT
   TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
-    )
+    auth.uid() = user_id 
+    OR is_account_member(account_id)
+    OR is_super_admin()
   );
 
-DROP POLICY IF EXISTS "Super admins can update all accounts" ON accounts;
-CREATE POLICY "Super admins can update all accounts" ON accounts
+CREATE POLICY profiles_update ON profiles
   FOR UPDATE
   TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
-    )
+    auth.uid() = user_id 
+    OR is_super_admin()
   );
 
+-- Policies on accounts
+DROP POLICY IF EXISTS "Super admins can view all accounts" ON accounts;
+DROP POLICY IF EXISTS "Super admins can update all accounts" ON accounts;
 DROP POLICY IF EXISTS "Super admins can insert accounts" ON accounts;
-CREATE POLICY "Super admins can insert accounts" ON accounts
+DROP POLICY IF EXISTS accounts_select ON accounts;
+DROP POLICY IF EXISTS accounts_update ON accounts;
+DROP POLICY IF EXISTS accounts_insert ON accounts;
+
+CREATE POLICY accounts_select ON accounts
+  FOR SELECT
+  TO authenticated
+  USING (
+    is_account_member(id) 
+    OR is_super_admin()
+  );
+
+CREATE POLICY accounts_update ON accounts
+  FOR UPDATE
+  TO authenticated
+  USING (
+    is_account_member(id, 'admin') 
+    OR is_super_admin()
+  );
+
+CREATE POLICY accounts_insert ON accounts
   FOR INSERT
   TO authenticated
   WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
-    )
-  );
-
-DROP POLICY IF EXISTS "Super admins can view all profiles" ON profiles;
-CREATE POLICY "Super admins can view all profiles" ON profiles
-  FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles p2
-      WHERE p2.user_id = auth.uid()
-        AND (p2.is_super_admin = TRUE OR p2.role = 'super_admin' OR LOWER(p2.email) = 'support@digisolvnet.com')
-    )
-  );
-
-DROP POLICY IF EXISTS "Super admins can update all profiles" ON profiles;
-CREATE POLICY "Super admins can update all profiles" ON profiles
-  FOR UPDATE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles p2
-      WHERE p2.user_id = auth.uid()
-        AND (p2.is_super_admin = TRUE OR p2.role = 'super_admin' OR LOWER(p2.email) = 'support@digisolvnet.com')
-    )
+    is_super_admin()
   );
 
 DROP POLICY IF EXISTS "Super admins can manage subscription payments" ON subscription_payments;
@@ -192,13 +213,7 @@ CREATE POLICY "Super admins can manage subscription payments"
   ON subscription_payments
   FOR ALL
   TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
-    )
-  );
+  USING (is_super_admin());
 
 DROP POLICY IF EXISTS "Anyone can read platform settings" ON platform_billing_settings;
 CREATE POLICY "Anyone can read platform settings"
@@ -212,10 +227,4 @@ CREATE POLICY "Only super admins can update platform settings"
   ON platform_billing_settings
   FOR ALL
   TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.user_id = auth.uid()
-        AND (profiles.is_super_admin = TRUE OR profiles.role = 'super_admin' OR LOWER(profiles.email) = 'support@digisolvnet.com')
-    )
-  );
+  USING (is_super_admin());
