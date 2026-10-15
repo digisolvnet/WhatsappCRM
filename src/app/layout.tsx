@@ -22,16 +22,17 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: "DIGISOLVNET — WhatsApp CRM",
+    template: "%s — DIGISOLVNET",
   },
-  description: "Self-hostable CRM template for WhatsApp.",
+  description: "DIGISOLVNET — Digital Solutions For Your Business. Official WhatsApp CRM Platform.",
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/icon" }],
+    icon: [{ url: "/brand-icon.png" }, { url: "/logo.png" }],
+    apple: [{ url: "/brand-icon.png" }],
   },
   formatDetection: {
     email: false,
