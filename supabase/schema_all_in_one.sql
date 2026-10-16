@@ -2,6 +2,7 @@
 -- DIGISOLVNET WhatsApp CRM — Complete 1-Click All-In-One Schema
 -- Target Super Admin: support@digisolvnet.com
 -- Default Password:  DigiSolvNet@2026!Admin
+-- (Note: Subscription status is NOT required for Super Admin)
 -- ==============================================================================
 
 -- Enable required extensions
@@ -10,12 +11,12 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ==============================================================================
 -- STEP 1: Pre-provision support@digisolvnet.com in auth.users
--- This ensures owner_user_id and user foreign keys succeed immediately
+-- This ensures owner_user_id and foreign keys succeed immediately
 -- ==============================================================================
 DO $$
 DECLARE
   v_admin_email TEXT := 'support@digisolvnet.com';
-  v_admin_password TEXT := 'DigiNet2026!Admin';
+  v_admin_password TEXT := 'DigiSolvNet@2026!Admin';
   v_user_id UUID;
   v_encrypted_password TEXT;
 BEGIN
@@ -23,7 +24,7 @@ BEGIN
 
   IF v_user_id IS NULL THEN
     v_user_id := uuid_generate_v4();
-    v_encrypted_password := crypt('DigiSolvNet@2026!Admin', gen_salt('bf', 10));
+    v_encrypted_password := crypt(v_admin_password, gen_salt('bf', 10));
 
     INSERT INTO auth.users (
       id,
@@ -7456,6 +7457,7 @@ CREATE POLICY "Super admins can view all export requests"
 
 -- ==============================================================================
 -- FINAL STEP: Elevate support@digisolvnet.com to Super Admin
+-- (Subscription status is NOT required for Super Admin)
 -- ==============================================================================
 
 -- ==============================================================================
@@ -7538,40 +7540,45 @@ BEGIN
     WHERE id = v_user_id;
   END IF;
 
-  -- 3. Ensure a primary root organization account exists
-  SELECT id INTO v_account_id FROM accounts WHERE billing_email = v_admin_email OR name = 'DIGISOLVNET Central' LIMIT 1;
+  -- 3. Ensure a primary root organization account exists for Super Admin
+  SELECT id INTO v_account_id FROM accounts WHERE owner_user_id = v_user_id OR billing_email = v_admin_email OR name ILIKE '%Admin%' LIMIT 1;
 
   IF v_account_id IS NULL THEN
     v_account_id := uuid_generate_v4();
     INSERT INTO accounts (
       id,
       name,
+      owner_user_id,
       billing_email,
       subscription_status,
       plan_name,
       monthly_price,
       currency,
       billing_cycle,
-      current_period_start,
-      current_period_ends_at,
       auto_reminder_enabled,
       created_at,
       updated_at
     ) VALUES (
       v_account_id,
-      'DIGISOLVNET Central',
+      'DIGISOLVNET Admin Workspace',
+      v_user_id,
       v_admin_email,
       'active',
-      'Enterprise Unlimited',
+      'Super Admin (Permanent Unrestricted)',
       0.00,
       'INR',
-      'annual',
-      NOW(),
-      NOW() + INTERVAL '10 years',
+      'never_expires',
       FALSE,
       NOW(),
       NOW()
     );
+  ELSE
+    UPDATE accounts
+    SET owner_user_id = v_user_id,
+        billing_email = v_admin_email,
+        plan_name = 'Super Admin (Permanent Unrestricted)',
+        auto_reminder_enabled = FALSE
+    WHERE id = v_account_id;
   END IF;
 
   -- 4. Upsert Admin Profile with Super Admin Privileges
@@ -7626,7 +7633,7 @@ BEGIN
   RAISE NOTICE 'SUCCESS: support@digisolvnet.com has been configured as SUPER ADMIN (User ID: %)', v_user_id;
 END $$;
 
--- Verify the admin configuration
+-- Verify the admin configuration (Subscription status is NOT required for Super Admin)
 SELECT 
   p.email,
   p.full_name,
@@ -7634,7 +7641,7 @@ SELECT
   p.account_role,
   p.is_super_admin,
   a.name AS account_name,
-  a.subscription_status
+  'NOT REQUIRED (Super Admin — Permanent Unrestricted Access)' AS subscription_requirement
 FROM profiles p
 LEFT JOIN accounts a ON a.id = p.account_id
 WHERE p.email = 'support@digisolvnet.com';

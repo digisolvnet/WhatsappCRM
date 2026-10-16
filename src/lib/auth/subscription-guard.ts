@@ -26,6 +26,8 @@ export interface AccountSubscriptionRecord {
   current_period_ends_at?: string | null;
   grace_period_days?: number | null;
   plan_tier?: string | null;
+  is_super_admin?: boolean | null;
+  role?: string | null;
 }
 
 export class SubscriptionSuspendedError extends Error {
@@ -60,6 +62,23 @@ export function checkSubscriptionAccess(
   account: AccountSubscriptionRecord | null | undefined,
   nowTimestamp?: string
 ): SubscriptionEvaluationResult {
+  // Super Admin bypass: Admin accounts never require a subscription status
+  if (
+    account?.is_super_admin === true ||
+    account?.role === "super_admin" ||
+    (account?.plan_tier && account.plan_tier.toLowerCase().includes("admin")) ||
+    account?.subscription_status === "exempt" ||
+    account?.subscription_status === "unlimited"
+  ) {
+    return {
+      allowed: true,
+      effectiveStatus: "ACTIVE",
+      isInGracePeriod: false,
+      daysRemaining: 999999,
+      reason: "Super Admin: Subscription status not required (Perpetual Unrestricted Access)",
+    };
+  }
+
   if (!account) {
     // If no account is loaded or during public setup
     return {
