@@ -1,6 +1,83 @@
--- DIGISOLVNET ALL IN ONE SCHEMA
+-- ==============================================================================
+-- DIGISOLVNET WhatsApp CRM — Complete 1-Click All-In-One Schema
+-- Target Super Admin: support@digisolvnet.com
+-- Default Password:  DigiSolvNet@2026!Admin
+-- ==============================================================================
 
--- FILE: 001_initial_schema.sql
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ==============================================================================
+-- STEP 1: Pre-provision support@digisolvnet.com in auth.users
+-- This ensures owner_user_id and user foreign keys succeed immediately
+-- ==============================================================================
+DO $$
+DECLARE
+  v_admin_email TEXT := 'support@digisolvnet.com';
+  v_admin_password TEXT := 'DigiNet2026!Admin';
+  v_user_id UUID;
+  v_encrypted_password TEXT;
+BEGIN
+  SELECT id INTO v_user_id FROM auth.users WHERE LOWER(email) = LOWER(v_admin_email) LIMIT 1;
+
+  IF v_user_id IS NULL THEN
+    v_user_id := uuid_generate_v4();
+    v_encrypted_password := crypt('DigiSolvNet@2026!Admin', gen_salt('bf', 10));
+
+    INSERT INTO auth.users (
+      id,
+      instance_id,
+      email,
+      encrypted_password,
+      email_confirmed_at,
+      raw_app_meta_data,
+      raw_user_meta_data,
+      role,
+      aud,
+      created_at,
+      updated_at
+    ) VALUES (
+      v_user_id,
+      '00000000-0000-0000-0000-000000000000',
+      v_admin_email,
+      v_encrypted_password,
+      NOW(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"full_name":"DIGISOLVNET Admin","email":"support@digisolvnet.com"}'::jsonb,
+      'authenticated',
+      'authenticated',
+      NOW(),
+      NOW()
+    );
+
+    INSERT INTO auth.identities (
+      id,
+      user_id,
+      identity_data,
+      provider,
+      provider_id,
+      last_sign_in_at,
+      created_at,
+      updated_at
+    ) VALUES (
+      uuid_generate_v4(),
+      v_user_id,
+      format('{"sub":"%s","email":"%s"}', v_user_id, v_admin_email)::jsonb,
+      'email',
+      v_user_id::text,
+      NOW(),
+      NOW(),
+      NOW()
+    );
+  END IF;
+END $$;
+
+
+-- ==============================================================================
+-- MIGRATION: 001_initial_schema.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Idempotent migration — safe to run multiple times.
 -- Uses IF NOT EXISTS for tables/indexes and DROP IF EXISTS
@@ -425,7 +502,10 @@ BEGIN
 END $$;
 
 
--- FILE: 002_pipelines_enhancements.sql
+-- ==============================================================================
+-- MIGRATION: 002_pipelines_enhancements.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Pipeline enhancements:
 --   * deals.assigned_to — optional FK to profiles.id
@@ -462,7 +542,10 @@ ALTER TABLE deals
   ADD CONSTRAINT deals_status_check CHECK (status IN ('open', 'won', 'lost'));
 
 
--- FILE: 003_broadcast_recipient_wamid.sql
+-- ==============================================================================
+-- MIGRATION: 003_broadcast_recipient_wamid.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Broadcast recipient correlation + aggregate counts
 --
@@ -549,7 +632,10 @@ AFTER INSERT OR UPDATE OR DELETE ON broadcast_recipients
 FOR EACH ROW EXECUTE FUNCTION public.broadcast_recipient_aggregate_trigger();
 
 
--- FILE: 004_contact_delete_set_null.sql
+-- ==============================================================================
+-- MIGRATION: 004_contact_delete_set_null.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Allow contact deletion without wiping history.
 --
@@ -617,7 +703,10 @@ ALTER TABLE deals
     ON DELETE SET NULL;
 
 
--- FILE: 005_broadcast_counts_incremental.sql
+-- ==============================================================================
+-- MIGRATION: 005_broadcast_counts_incremental.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Incremental broadcast aggregate trigger.
 --
@@ -749,7 +838,10 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
--- FILE: 006_automations.sql
+-- ==============================================================================
+-- MIGRATION: 006_automations.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 006_automations.sql — Automations feature
 --
@@ -892,7 +984,10 @@ ALTER TABLE automation_pending_executions ENABLE ROW LEVEL SECURITY;
 -- access is server-side via the service-role key.
 
 
--- FILE: 007_automations_increment_counter.sql
+-- ==============================================================================
+-- MIGRATION: 007_automations_increment_counter.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 007_automations_increment_counter.sql
 --
@@ -930,7 +1025,10 @@ REVOKE ALL ON FUNCTION increment_automation_execution_count(UUID) FROM authentic
 GRANT EXECUTE ON FUNCTION increment_automation_execution_count(UUID) TO service_role;
 
 
--- FILE: 008_profile_avatars_storage.sql
+-- ==============================================================================
+-- MIGRATION: 008_profile_avatars_storage.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 008_profile_avatars_storage.sql
 --
@@ -992,7 +1090,10 @@ CREATE POLICY "Users can delete their own avatar"
   );
 
 
--- FILE: 009_message_actions.sql
+-- ==============================================================================
+-- MIGRATION: 009_message_actions.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Chat actions: reply linkage + reactions
 --
@@ -1109,7 +1210,10 @@ BEGIN
 END $$;
 
 
--- FILE: 010_flows.sql
+-- ==============================================================================
+-- MIGRATION: 010_flows.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Conversational Flows: stateful, branching WhatsApp chatbot.
 --
@@ -1392,7 +1496,10 @@ BEGIN
 END $$;
 
 
--- FILE: 011_profile_beta_features.sql
+-- ==============================================================================
+-- MIGRATION: 011_profile_beta_features.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Per-account beta feature flag column on `profiles`.
 --
@@ -1435,7 +1542,10 @@ ALTER TABLE profiles
 -- rarely written.
 
 
--- FILE: 012_flows_increment_counter.sql
+-- ==============================================================================
+-- MIGRATION: 012_flows_increment_counter.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 012_flows_increment_counter.sql
 --
@@ -1474,7 +1584,10 @@ REVOKE ALL ON FUNCTION increment_flow_execution_count(UUID) FROM authenticated;
 GRANT EXECUTE ON FUNCTION increment_flow_execution_count(UUID) TO service_role;
 
 
--- FILE: 013_whatsapp_config_phone_number_id_unique.sql
+-- ==============================================================================
+-- MIGRATION: 013_whatsapp_config_phone_number_id_unique.sql
+-- ==============================================================================
+
 -- ============================================================
 -- whatsapp_config: enforce one user per phone_number_id
 --
@@ -1561,7 +1674,10 @@ BEGIN
 END $$;
 
 
--- FILE: 014_message_templates_meta_integration.sql
+-- ==============================================================================
+-- MIGRATION: 014_message_templates_meta_integration.sql
+-- ==============================================================================
+
 -- ============================================================
 -- message_templates: Meta-integration columns + raw-enum status
 --
@@ -1762,7 +1878,10 @@ CREATE INDEX IF NOT EXISTS idx_message_templates_meta_template_id
   WHERE meta_template_id IS NOT NULL;
 
 
--- FILE: 015_whatsapp_config_registration.sql
+-- ==============================================================================
+-- MIGRATION: 015_whatsapp_config_registration.sql
+-- ==============================================================================
+
 -- ============================================================
 -- whatsapp_config: track Meta Cloud API registration state
 --
@@ -1810,7 +1929,10 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_config_registered_at
   WHERE registered_at IS NULL;
 
 
--- FILE: 016_flow_media.sql
+-- ==============================================================================
+-- MIGRATION: 016_flow_media.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 016_flow_media.sql
 --
@@ -1927,7 +2049,10 @@ CREATE POLICY "Users can delete their own flow media"
   );
 
 
--- FILE: 017_account_sharing.sql
+-- ==============================================================================
+-- MIGRATION: 017_account_sharing.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 017_account_sharing.sql — Multi-user accounts (foundation)
 --
@@ -2619,7 +2744,10 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
--- FILE: 018_account_member_rpcs.sql
+-- ==============================================================================
+-- MIGRATION: 018_account_member_rpcs.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 018_account_member_rpcs.sql — RPCs for member management
 --
@@ -2905,7 +3033,10 @@ REVOKE ALL ON FUNCTION public.transfer_account_ownership(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.transfer_account_ownership(UUID) TO authenticated;
 
 
--- FILE: 019_invitation_rpcs.sql
+-- ==============================================================================
+-- MIGRATION: 019_invitation_rpcs.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 019_invitation_rpcs.sql — peek + redeem invitation RPCs
 --
@@ -3145,7 +3276,10 @@ REVOKE ALL ON FUNCTION public.redeem_invitation(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.redeem_invitation(TEXT) TO authenticated;
 
 
--- FILE: 020_account_sharing_followups.sql
+-- ==============================================================================
+-- MIGRATION: 020_account_sharing_followups.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 020_account_sharing_followups.sql — review-board fixes for
 -- the multi-user accounts series (#167-#177).
@@ -3270,7 +3404,10 @@ CREATE POLICY "Members can delete flow media"
 -- conventions without modification.
 
 
--- FILE: 021_account_default_currency.sql
+-- ==============================================================================
+-- MIGRATION: 021_account_default_currency.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 021_account_default_currency
 --
@@ -3305,7 +3442,10 @@ ALTER TABLE accounts
   CHECK (default_currency ~ '^[A-Z]{3}$');
 
 
--- FILE: 022_contact_phone_dedup.sql
+-- ==============================================================================
+-- MIGRATION: 022_contact_phone_dedup.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 022_contact_phone_dedup
 --
@@ -3428,7 +3568,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_account_phone_normalized
   WHERE phone_normalized <> '';
 
 
--- FILE: 023_chat_media.sql
+-- ==============================================================================
+-- MIGRATION: 023_chat_media.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 023_chat_media.sql
 --
@@ -3553,7 +3696,10 @@ CREATE POLICY "Members can delete chat media"
   );
 
 
--- FILE: 024_member_presence.sql
+-- ==============================================================================
+-- MIGRATION: 024_member_presence.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 024_member_presence.sql — team member presence (online / away)
 --
@@ -3657,7 +3803,10 @@ BEGIN
 END $$;
 
 
--- FILE: 025_filter_contacts_by_tags.sql
+-- ==============================================================================
+-- MIGRATION: 025_filter_contacts_by_tags.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 025_filter_contacts_by_tags.sql — server-side tag filter
 --
@@ -3735,7 +3884,10 @@ REVOKE ALL ON FUNCTION public.filter_contacts_by_tags(UUID[], TEXT, INT, INT) FR
 GRANT EXECUTE ON FUNCTION public.filter_contacts_by_tags(UUID[], TEXT, INT, INT) TO authenticated;
 
 
--- FILE: 026_api_keys.sql
+-- ==============================================================================
+-- MIGRATION: 026_api_keys.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 026_api_keys.sql — Public API credentials (groundwork)
 --
@@ -3822,7 +3974,10 @@ CREATE POLICY api_keys_delete ON api_keys FOR DELETE
   USING (is_account_member(account_id, 'admin'));
 
 
--- FILE: 027_notifications.sql
+-- ==============================================================================
+-- MIGRATION: 027_notifications.sql
+-- ==============================================================================
+
 -- ============================================================
 -- NOTIFICATIONS
 -- ============================================================
@@ -3956,7 +4111,10 @@ BEGIN
 END $$;
 
 
--- FILE: 028_webhook_endpoints.sql
+-- ==============================================================================
+-- MIGRATION: 028_webhook_endpoints.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 028_webhook_endpoints.sql — Outbound event webhooks (public API)
 --
@@ -4062,7 +4220,10 @@ RETURNS void AS $$
 $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 
 
--- FILE: 029_ai_reply.sql
+-- ==============================================================================
+-- MIGRATION: 029_ai_reply.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 029_ai_reply.sql — AI reply assistant (bring-your-own-key)
 --
@@ -4206,7 +4367,10 @@ $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 GRANT EXECUTE ON FUNCTION public.claim_ai_reply_slot(uuid, integer) TO service_role;
 
 
--- FILE: 030_ai_knowledge.sql
+-- ==============================================================================
+-- MIGRATION: 030_ai_knowledge.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 030_ai_knowledge.sql — AI knowledge base (RAG grounding)
 --
@@ -4413,7 +4577,10 @@ REVOKE ALL ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer) F
 GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer) TO authenticated, service_role;
 
 
--- FILE: 031_ai_reply_slot_grant.sql
+-- ==============================================================================
+-- MIGRATION: 031_ai_reply_slot_grant.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 031_ai_reply_slot_grant.sql — fix: AI auto-reply never fires
 --
@@ -4443,7 +4610,10 @@ GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer
 GRANT EXECUTE ON FUNCTION public.claim_ai_reply_slot(uuid, integer) TO service_role;
 
 
--- FILE: 032_fix_ai_knowledge_membership.sql
+-- ==============================================================================
+-- MIGRATION: 032_fix_ai_knowledge_membership.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 032_fix_ai_knowledge_membership.sql — stop cross-account KB
 --                                        reads (GHSA-fg5p-2qc3-jmxr, H2)
@@ -4546,7 +4716,10 @@ GRANT EXECUTE ON FUNCTION public.match_ai_knowledge_semantic(uuid, text, integer
 -- ============================================================
 
 
--- FILE: 033_ai_reply_polish.sql
+-- ==============================================================================
+-- MIGRATION: 033_ai_reply_polish.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 033_ai_reply_polish.sql — AI reply assistant polish
 --
@@ -4635,7 +4808,10 @@ CREATE POLICY ai_usage_log_select ON ai_usage_log FOR SELECT
 -- is never mutated from the client.
 
 
--- FILE: 034_fix_profiles_update_rls.sql
+-- ==============================================================================
+-- MIGRATION: 034_fix_profiles_update_rls.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 034_fix_profiles_update_rls.sql — lock down privilege columns
 --                                    on profiles (GHSA-fg5p-2qc3-jmxr, C1)
@@ -4735,7 +4911,10 @@ CREATE TRIGGER enforce_profile_privilege_columns
 -- ============================================================
 
 
--- FILE: 035_interactive_messages.sql
+-- ==============================================================================
+-- MIGRATION: 035_interactive_messages.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 035_interactive_messages.sql
 --
@@ -4799,7 +4978,10 @@ CREATE TRIGGER set_updated_at BEFORE UPDATE ON quick_replies
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 
--- FILE: 036_conversation_contact_dedup.sql
+-- ==============================================================================
+-- MIGRATION: 036_conversation_contact_dedup.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 036_conversation_contact_dedup
 --
@@ -4928,7 +5110,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_contact
   ON conversations (account_id, contact_id);
 
 
--- FILE: 037_webhook_broadcast_reliability.sql
+-- ==============================================================================
+-- MIGRATION: 037_webhook_broadcast_reliability.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 037_webhook_broadcast_reliability
 --
@@ -5085,7 +5270,10 @@ REVOKE ALL ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT,
 GRANT EXECUTE ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, UUID[]) TO service_role;
 
 
--- FILE: 038_broadcast_resume.sql
+-- ==============================================================================
+-- MIGRATION: 038_broadcast_resume.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 038_broadcast_resume
 --
@@ -5203,7 +5391,10 @@ REVOKE ALL ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT,
 GRANT EXECUTE ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, UUID[], JSONB[]) TO service_role;
 
 
--- FILE: 039_inbound_media_mirror.sql
+-- ==============================================================================
+-- MIGRATION: 039_inbound_media_mirror.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 039_inbound_media_mirror
 --
@@ -5329,7 +5520,10 @@ SET
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
 
--- FILE: 040_contact_business_scoped_user_id.sql
+-- ==============================================================================
+-- MIGRATION: 040_contact_business_scoped_user_id.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 040_contact_business_scoped_user_id
 --
@@ -5377,7 +5571,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_account_wa_user_id
   WHERE wa_user_id IS NOT NULL;
 
 
--- FILE: 041_fix_broadcast_contact_id_ambiguity.sql
+-- ==============================================================================
+-- MIGRATION: 041_fix_broadcast_contact_id_ambiguity.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 041_fix_broadcast_contact_id_ambiguity.sql — make
 --     create_broadcast_with_recipients executable
@@ -5491,7 +5688,10 @@ REVOKE ALL ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT,
 GRANT EXECUTE ON FUNCTION public.create_broadcast_with_recipients(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, UUID[], JSONB[]) TO service_role;
 
 
--- FILE: 042_message_failure_reason.sql
+-- ==============================================================================
+-- MIGRATION: 042_message_failure_reason.sql
+-- ==============================================================================
+
 -- ============================================================
 -- 042_message_failure_reason
 --
@@ -5546,7 +5746,10 @@ COMMENT ON COLUMN messages.error_details IS
   'supplied details.';
 
 
--- FILE: 043_subscription_and_super_admin.sql
+-- ==============================================================================
+-- MIGRATION: 043_subscription_and_super_admin.sql
+-- ==============================================================================
+
 -- Migration 043: Multi-tenant Subscription SaaS & Super Admin CRM
 -- Adds subscription management to accounts, super-admin privileges, and payment reminder tracking.
 
@@ -5659,7 +5862,10 @@ CREATE POLICY "Only super admins can update platform settings"
   );
 
 
--- FILE: 044_transfer_super_admin_and_fix_rls.sql
+-- ==============================================================================
+-- MIGRATION: 044_transfer_super_admin_and_fix_rls.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 044: Complete SaaS Setup, Transfer to support@digisolvnet.com, & Super Admin RLS
 -- ============================================================
@@ -5892,7 +6098,10 @@ CREATE POLICY "Only super admins can update platform settings"
   USING (is_super_admin());
 
 
--- FILE: 045_fix_profiles_rls_infinite_recursion.sql
+-- ==============================================================================
+-- MIGRATION: 045_fix_profiles_rls_infinite_recursion.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 045: Fix Infinite Recursion in Profiles RLS Policy
 -- ============================================================
@@ -6001,7 +6210,10 @@ CREATE POLICY "Only super admins can update platform settings"
   USING (is_super_admin());
 
 
--- FILE: 046_link_unlinked_profiles_to_accounts.sql
+-- ==============================================================================
+-- MIGRATION: 046_link_unlinked_profiles_to_accounts.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 046: Ensure All Profiles Are Linked to Valid Accounts
 -- ============================================================
@@ -6080,7 +6292,10 @@ BEGIN
 END $$;
 
 
--- FILE: 047_fix_not_null_account_id_and_link.sql
+-- ==============================================================================
+-- MIGRATION: 047_fix_not_null_account_id_and_link.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 047: Fix 23502 NOT NULL Constraint & Link All Profiles
 -- ============================================================
@@ -6131,8 +6346,8 @@ BEGIN
   ORDER BY created_at DESC 
   LIMIT 1;
 
-  -- If no account exists yet, create it
-  IF v_primary_account_id IS NULL THEN
+  -- If no account exists yet, create it (only if a valid user ID exists)
+  IF v_primary_account_id IS NULL AND (v_new_user_id IS NOT NULL OR v_old_user_id IS NOT NULL) THEN
     INSERT INTO accounts (name, owner_user_id, billing_email, subscription_status, plan_name)
     VALUES ('DIGISOLVNET Admin Workspace', COALESCE(v_new_user_id, v_old_user_id), 'support@digisolvnet.com', 'active', 'Monthly Pro')
     RETURNING id INTO v_primary_account_id;
@@ -6322,7 +6537,10 @@ CREATE POLICY accounts_insert ON accounts
   );
 
 
--- FILE: 048_super_admin_account_member_and_inbox.sql
+-- ==============================================================================
+-- MIGRATION: 048_super_admin_account_member_and_inbox.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 048: Super Admin Account Member & CRM Inbox Visibility
 --
@@ -6369,7 +6587,10 @@ ALTER FUNCTION public.is_account_member(UUID, account_role_enum) OWNER TO postgr
 GRANT EXECUTE ON FUNCTION public.is_account_member(UUID, account_role_enum) TO authenticated, service_role;
 
 
--- FILE: 049_razorpay_gateway_integration.sql
+-- ==============================================================================
+-- MIGRATION: 049_razorpay_gateway_integration.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 049: Razorpay Payment Gateway Integration
 --
@@ -6456,7 +6677,10 @@ CREATE INDEX IF NOT EXISTS idx_crm_payment_links_conv ON crm_payment_links(conve
 CREATE INDEX IF NOT EXISTS idx_crm_payment_links_rzp_link ON crm_payment_links(razorpay_payment_link_id);
 
 
--- FILE: 050_platform_audit_and_tenant_isolation.sql
+-- ==============================================================================
+-- MIGRATION: 050_platform_audit_and_tenant_isolation.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 050: Platform Auditing & Multi-Tenant Data Isolation
 --
@@ -6557,7 +6781,10 @@ AS $$
 $$;
 
 
--- FILE: 051_central_orders_and_provisioning.sql
+-- ==============================================================================
+-- MIGRATION: 051_central_orders_and_provisioning.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 051: Central Orders, Provisioning & Webhook Idempotency
 --
@@ -6654,7 +6881,10 @@ CREATE POLICY "Super admins can view webhook events"
   );
 
 
--- FILE: 052_licenses_and_subscription_lifecycle.sql
+-- ==============================================================================
+-- MIGRATION: 052_licenses_and_subscription_lifecycle.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 052: Licenses & Subscription Lifecycle Automation
 --
@@ -6762,7 +6992,10 @@ ALTER TABLE platform_billing_settings
   ADD COLUMN IF NOT EXISTS default_grace_period_days INTEGER DEFAULT 3;
 
 
--- FILE: 053_tenant_catalogue_and_orders.sql
+-- ==============================================================================
+-- MIGRATION: 053_tenant_catalogue_and_orders.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 053: Tenant Business Catalogue & Order Management
 --
@@ -6969,7 +7202,10 @@ CREATE POLICY "Public can view catalogue settings"
   );
 
 
--- FILE: 054_flow_execution_history_and_limits.sql
+-- ==============================================================================
+-- MIGRATION: 054_flow_execution_history_and_limits.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 054: Flow Execution Quotas, History & Lifecycle Controls
 --
@@ -7072,7 +7308,10 @@ CREATE POLICY "Super admins can view all flow execution logs"
   );
 
 
--- FILE: 055_governance_risk_controls_and_feature_flags.sql
+-- ==============================================================================
+-- MIGRATION: 055_governance_risk_controls_and_feature_flags.sql
+-- ==============================================================================
+
 -- ============================================================
 -- Migration 055: Governance, Risk Controls, Abuse Detection & Feature Flags
 --
@@ -7215,7 +7454,10 @@ CREATE POLICY "Super admins can view all export requests"
   );
 
 
--- SUPER ADMIN
+-- ==============================================================================
+-- FINAL STEP: Elevate support@digisolvnet.com to Super Admin
+-- ==============================================================================
+
 -- ==============================================================================
 -- DIGISOLVNET WhatsApp CRM — Super Admin Setup Script
 -- Target Admin: support@digisolvnet.com

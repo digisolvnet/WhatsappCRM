@@ -48,8 +48,8 @@ BEGIN
   ORDER BY created_at DESC 
   LIMIT 1;
 
-  -- If no account exists yet, create it
-  IF v_primary_account_id IS NULL THEN
+  -- If no account exists yet, create it (only if a valid user ID exists)
+  IF v_primary_account_id IS NULL AND (v_new_user_id IS NOT NULL OR v_old_user_id IS NOT NULL) THEN
     INSERT INTO accounts (name, owner_user_id, billing_email, subscription_status, plan_name)
     VALUES ('DIGISOLVNET Admin Workspace', COALESCE(v_new_user_id, v_old_user_id), 'support@digisolvnet.com', 'active', 'Monthly Pro')
     RETURNING id INTO v_primary_account_id;
