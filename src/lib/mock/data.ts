@@ -1,4 +1,5 @@
 // Mock data for local testing without Supabase or Meta credentials
+export { isDemoMode } from "./client";
 
 export const MOCK_USER_ID = "00000000-0000-0000-0000-000000000001";
 export const MOCK_ACCOUNT_ID = "11111111-1111-1111-1111-111111111111";

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { isDemoMode } from "@/lib/mock/data";
+import { isDemoMode } from "@/lib/mock/client";
 import { MOCK_SUBSCRIBERS, MOCK_ACCOUNT_ID } from "@/lib/mock/data";
 import {
   evaluateAbuseRiskScore,

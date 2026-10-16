@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { isDemoMode } from "@/lib/mock/data";
+import { isDemoMode } from "@/lib/mock/client";
 import {
   MOCK_TENANT_PRODUCTS,
   MOCK_TENANT_ORDERS,

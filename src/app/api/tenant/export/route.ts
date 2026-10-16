@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAccount } from "@/lib/auth/account";
-import { isDemoMode } from "@/lib/mock/data";
+import { isDemoMode } from "@/lib/mock/client";
 import {
   MOCK_CONTACTS,
   MOCK_TENANT_PRODUCTS,
