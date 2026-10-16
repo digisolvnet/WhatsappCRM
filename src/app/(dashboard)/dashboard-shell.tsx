@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { AccountAccessAlert } from "@/components/layout/account-access-alert";
 import { SubscriptionBanner } from "@/components/layout/subscription-banner";
+import { SetupGuideModal } from "@/components/layout/setup-guide-modal";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { BrowserNotificationsListener } from "@/components/notifications/browser-notifications-listener";
 
@@ -61,6 +62,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
               Renders nothing unless the account/role failed to resolve. */}
           <AccountAccessAlert />
           <SubscriptionBanner />
+          <SetupGuideModal />
           {children}
         </main>
       </div>

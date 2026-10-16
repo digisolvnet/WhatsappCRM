@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { MOCK_SUBSCRIBERS, MOCK_SUBSCRIPTION_PAYMENTS } from "@/lib/mock/data";
+import { syncWithMasterAdmin } from "@/lib/remote/remote-client";
 
 export async function GET(request: Request) {
   try {
@@ -394,6 +395,21 @@ export async function POST(request: Request) {
         });
       } catch {}
     }
+
+    // Async background sync with DigiSolvNet Central CRM (https://wacrm-six-sigma.vercel.app)
+    syncWithMasterAdmin({
+      instance_id: newAccount.id,
+      name: newAccount.name,
+      owner_name: owner_name || "Customer Owner",
+      owner_email,
+      billing_phone: phone,
+      plan_name: newAccount.plan_name || plan_name || "Monthly Pro",
+      monthly_price: price,
+      currency: curr,
+      subscription_status: newAccount.subscription_status || status,
+      current_period_ends_at: newAccount.current_period_ends_at || expiryDate,
+      notes: notes || "",
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { LogOut, Menu, Settings as SettingsIcon, User, Sparkles } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -74,6 +74,20 @@ export function Header({ onOpenSidebar }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("wacrm:open-setup-guide"));
+            }
+          }}
+          className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/20 transition-all"
+          title="Open WhatsApp Setup & Configuration Guide"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+          <span className="hidden sm:inline">Setup Guide</span>
+        </button>
+
         <ModeToggle />
 
         <DropdownMenu>

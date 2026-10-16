@@ -55,6 +55,8 @@ interface Subscriber {
   reminder_count?: number;
   notes?: string;
   created_at: string;
+  instance_url?: string;
+  is_remote?: boolean;
 }
 
 interface Stats {
@@ -143,19 +145,59 @@ export default function AdminCrmPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/subscribers");
+      const [res, remoteRes, sRes] = await Promise.all([
+        fetch("/api/admin/subscribers"),
+        fetch("/api/admin/remote-sync").catch(() => null),
+        fetch("/api/admin/settings"),
+      ]);
+
       const data = await res.json();
+      let mergedSubscribers: Subscriber[] = [];
+
       if (res.ok) {
-        setSubscribers(data.subscribers || []);
+        mergedSubscribers = data.subscribers || [];
         setStats(data.stats || null);
       } else {
         toast.error(data.error || "Failed to load subscribers");
       }
 
-      const sRes = await fetch("/api/admin/settings");
-      const sData = await sRes.json();
-      if (sRes.ok && sData.settings) {
-        setSettings(sData.settings);
+      if (remoteRes && remoteRes.ok) {
+        try {
+          const remoteData = await remoteRes.json();
+          if (remoteData.remote_subscribers && Array.isArray(remoteData.remote_subscribers)) {
+            const remoteMapped: Subscriber[] = remoteData.remote_subscribers.map((r: any) => ({
+              id: r.instance_id,
+              name: r.name,
+              owner_name: r.owner_name || "Admin",
+              owner_email: r.owner_email || "",
+              billing_phone: r.billing_phone || "",
+              subscription_status: (r.subscription_status || "active") as any,
+              plan_name: r.plan_name || "Monthly Pro",
+              monthly_price: Number(r.monthly_price || 999),
+              currency: r.currency || "INR",
+              current_period_start: r.created_at || new Date().toISOString(),
+              current_period_ends_at: r.current_period_ends_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+              notes: r.notes || "",
+              created_at: r.created_at || new Date().toISOString(),
+              instance_url: r.instance_url,
+              is_remote: true,
+            }));
+
+            const existingIds = new Set(mergedSubscribers.map((s) => s.id));
+            remoteMapped.forEach((rm) => {
+              if (!existingIds.has(rm.id)) {
+                mergedSubscribers.push(rm);
+              }
+            });
+          }
+        } catch {}
+      }
+
+      setSubscribers(mergedSubscribers);
+
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        if (sData.settings) setSettings(sData.settings);
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to fetch admin data");
@@ -336,6 +378,28 @@ export default function AdminCrmPage() {
 
   const handleToggleStatus = async (sub: Subscriber) => {
     const nextStatus = sub.subscription_status === "active" ? "suspended" : "active";
+    if (sub.is_remote) {
+      try {
+        const res = await fetch("/api/admin/remote-sync", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instance_id: sub.id,
+            subscription_status: nextStatus,
+          }),
+        });
+        if (res.ok) {
+          toast.success(`Remote instance ${nextStatus === "active" ? "activated" : "suspended"}!`);
+          loadData();
+        } else {
+          toast.error("Failed to update remote status");
+        }
+      } catch (err: any) {
+        toast.error(err.message);
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`/api/admin/subscribers/${sub.id}`, {
         method: "PATCH",
@@ -356,6 +420,34 @@ export default function AdminCrmPage() {
   const handleSaveEdit = async () => {
     if (!editingSub) return;
     setIsSavingEdit(true);
+
+    if (editingSub.is_remote) {
+      try {
+        const res = await fetch("/api/admin/remote-sync", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instance_id: editingSub.id,
+            subscription_status: editingSub.subscription_status,
+            current_period_ends_at: editingSub.current_period_ends_at,
+            notes: editingSub.notes,
+          }),
+        });
+        if (res.ok) {
+          toast.success("Remote subscriber updated successfully");
+          setEditingSub(null);
+          loadData();
+        } else {
+          toast.error("Failed to update remote subscriber");
+        }
+      } catch (err: any) {
+        toast.error(err.message);
+      } finally {
+        setIsSavingEdit(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`/api/admin/subscribers/${editingSub.id}`, {
         method: "PATCH",
@@ -739,7 +831,20 @@ export default function AdminCrmPage() {
                       return (
                         <tr key={sub.id} className="hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-3.5">
-                            <div className="font-semibold text-foreground text-sm">{sub.name}</div>
+                            <div className="font-semibold text-foreground text-sm flex items-center gap-2">
+                              {sub.name}
+                              {sub.is_remote && (
+                                <a
+                                  href={sub.instance_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 rounded bg-blue-500/10 border border-blue-500/30 px-1.5 py-0.5 text-[10px] text-blue-400 font-normal hover:underline"
+                                  title={`Remote Instance: ${sub.instance_url}`}
+                                >
+                                  🌐 Remote <ExternalLink className="h-2.5 w-2.5" />
+                                </a>
+                              )}
+                            </div>
                             <div className="text-muted-foreground text-[11px] flex items-center gap-1.5 mt-0.5">
                               <span>{sub.owner_name}</span>
                               <span>•</span>
