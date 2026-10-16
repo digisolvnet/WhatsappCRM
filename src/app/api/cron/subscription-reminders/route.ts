@@ -11,6 +11,7 @@ import {
 } from "@/lib/mock/data";
 import { sendTextMessage } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { isRenewalReminderDue } from "@/lib/licenses/lifecycle";
 
 export const maxDuration = 60;
 
@@ -22,10 +23,14 @@ export async function POST(request: Request) {
   return handleCronReminders(request);
 }
 
+// In-memory demo deduplication cache: `${subId}_${milestone}_${dateStr}`
+const demoSentReminders = new Set<string>();
+
 async function handleCronReminders(request: Request) {
   try {
     const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
     const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
     const results: Array<{
       accountId: string;
       accountName: string;
@@ -36,7 +41,10 @@ async function handleCronReminders(request: Request) {
     }> = [];
 
     if (isDemo) {
-      // Process mock subscribers for demo
+      // Process mock subscribers for demo with configurable milestones: 15, 7, 3, 1, 0 days
+      const demoMilestones = [15, 7, 3, 1, 0];
+      const demoGracePeriodDays = 3;
+
       for (const sub of MOCK_SUBSCRIBERS) {
         if (!sub.auto_reminder_enabled) continue;
 
@@ -44,104 +52,121 @@ async function handleCronReminders(request: Request) {
         const diffMs = expiry.getTime() - now.getTime();
         const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-        // Skip if already sent reminder in the last 24 hours
-        if (sub.last_reminder_sent_at) {
-          const lastSent = new Date(sub.last_reminder_sent_at);
-          if (now.getTime() - lastSent.getTime() < 24 * 3600 * 1000) {
-            continue;
-          }
-        }
+        // Evaluate milestone due
+        const matchedMilestone = demoMilestones.find(
+          (m) => daysRemaining <= m && daysRemaining >= m - 2 && daysRemaining >= 0
+        );
 
-        if (daysRemaining <= 3 && daysRemaining >= 0) {
-          sub.last_reminder_sent_at = now.toISOString();
-          sub.reminder_count = (sub.reminder_count || 0) + 1;
-          results.push({
-            accountId: sub.id,
-            accountName: sub.name,
-            daysRemaining,
-            action: `Sent ${daysRemaining}-day payment reminder`,
-            phone: sub.billing_phone,
-            status: "sent_demo",
-          });
+        if (matchedMilestone !== undefined) {
+          const dedupKey = `${sub.id}_${matchedMilestone}_${todayStr}`;
+          if (!demoSentReminders.has(dedupKey)) {
+            demoSentReminders.add(dedupKey);
+            sub.last_reminder_sent_at = now.toISOString();
+            sub.reminder_count = (sub.reminder_count || 0) + 1;
+            
+            results.push({
+              accountId: sub.id,
+              accountName: sub.name,
+              daysRemaining,
+              action: `Sent ${matchedMilestone}-day renewal reminder (${daysRemaining}d remaining)`,
+              phone: sub.billing_phone,
+              status: "sent_demo",
+            });
 
-          // Sync into mock CRM Inbox
-          const template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
-          const dueDateStr = expiry.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-          const payLink = sub.payment_link || MOCK_PLATFORM_SETTINGS.default_payment_link || "https://example.com/pay";
-          const msgText = template
-            .replace(/{{name}}/g, sub.owner_name || sub.name)
-            .replace(/{{account_name}}/g, sub.name)
-            .replace(/{{due_date}}/g, dueDateStr)
-            .replace(/{{amount}}/g, `$${sub.monthly_price || 49}`)
-            .replace(/{{payment_link}}/g, payLink);
+            // Sync into mock CRM Inbox
+            const template = MOCK_PLATFORM_SETTINGS.reminder_message_template;
+            const dueDateStr = expiry.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+            const payLink = sub.payment_link || MOCK_PLATFORM_SETTINGS.default_payment_link || "https://example.com/pay";
+            const msgText = template
+              .replace(/{{name}}/g, sub.owner_name || sub.name)
+              .replace(/{{account_name}}/g, sub.name)
+              .replace(/{{due_date}}/g, dueDateStr)
+              .replace(/{{amount}}/g, `$${sub.monthly_price || 49}`)
+              .replace(/{{payment_link}}/g, payLink);
 
-          const convId = `conv-sub-${sub.id}`;
-          const contactId = `contact-sub-${sub.id}`;
-          let contact = MOCK_CONTACTS.find((c) => c.id === contactId || c.phone === sub.billing_phone);
-          if (!contact) {
-            contact = {
-              id: contactId,
-              user_id: MOCK_USER_ID,
-              account_id: MOCK_ACCOUNT_ID,
-              phone: sub.billing_phone || "+10000000000",
-              name: sub.owner_name || sub.name,
-              email: sub.owner_email || "",
-              company: sub.name,
-              created_at: now.toISOString(),
-              updated_at: now.toISOString(),
-              tags: [],
-            };
-            MOCK_CONTACTS.unshift(contact);
-          }
-
-          let conv = MOCK_CONVERSATIONS.find((c) => c.id === convId);
-          if (!conv) {
-            conv = {
-              id: convId,
-              account_id: MOCK_ACCOUNT_ID,
-              user_id: MOCK_USER_ID,
-              contact_id: contact.id,
-              status: "open",
-              last_message_text: msgText,
-              last_message_at: now.toISOString(),
-              unread_count: 0,
-              created_at: now.toISOString(),
-              updated_at: now.toISOString(),
-              contact,
-            };
-            MOCK_CONVERSATIONS.unshift(conv);
-          } else {
-            conv.last_message_text = msgText;
-            conv.last_message_at = now.toISOString();
-            const idx = MOCK_CONVERSATIONS.indexOf(conv);
-            if (idx > 0) {
-              MOCK_CONVERSATIONS.splice(idx, 1);
-              MOCK_CONVERSATIONS.unshift(conv);
+            const convId = `conv-sub-${sub.id}`;
+            const contactId = `contact-sub-${sub.id}`;
+            let contact = MOCK_CONTACTS.find((c) => c.id === contactId || c.phone === sub.billing_phone);
+            if (!contact) {
+              contact = {
+                id: contactId,
+                user_id: MOCK_USER_ID,
+                account_id: MOCK_ACCOUNT_ID,
+                phone: sub.billing_phone || "+10000000000",
+                name: sub.owner_name || sub.name,
+                email: sub.owner_email || "",
+                company: sub.name,
+                created_at: now.toISOString(),
+                updated_at: now.toISOString(),
+                tags: [],
+              };
+              MOCK_CONTACTS.unshift(contact);
             }
-          }
 
-          if (!MOCK_MESSAGES[convId]) MOCK_MESSAGES[convId] = [];
-          MOCK_MESSAGES[convId].push({
-            id: `msg-${Date.now()}-${sub.id}`,
-            conversation_id: convId,
-            sender_type: "agent",
-            content_type: "text",
-            content_text: msgText,
-            created_at: now.toISOString(),
-            status: "delivered",
-          });
-        } else if (daysRemaining < 0 && sub.subscription_status !== "suspended") {
-          sub.subscription_status = "past_due";
-          sub.last_reminder_sent_at = now.toISOString();
-          sub.reminder_count = (sub.reminder_count || 0) + 1;
-          results.push({
-            accountId: sub.id,
-            accountName: sub.name,
-            daysRemaining,
-            action: "Marked past_due and sent expiry alert",
-            phone: sub.billing_phone,
-            status: "past_due_demo",
-          });
+            let conv = MOCK_CONVERSATIONS.find((c) => c.id === convId);
+            if (!conv) {
+              conv = {
+                id: convId,
+                account_id: MOCK_ACCOUNT_ID,
+                user_id: MOCK_USER_ID,
+                contact_id: contact.id,
+                status: "open",
+                last_message_text: msgText,
+                last_message_at: now.toISOString(),
+                unread_count: 0,
+                created_at: now.toISOString(),
+                updated_at: now.toISOString(),
+                contact,
+              };
+              MOCK_CONVERSATIONS.unshift(conv);
+            } else {
+              conv.last_message_text = msgText;
+              conv.last_message_at = now.toISOString();
+              const idx = MOCK_CONVERSATIONS.indexOf(conv);
+              if (idx > 0) {
+                MOCK_CONVERSATIONS.splice(idx, 1);
+                MOCK_CONVERSATIONS.unshift(conv);
+              }
+            }
+
+            if (!MOCK_MESSAGES[convId]) MOCK_MESSAGES[convId] = [];
+            MOCK_MESSAGES[convId].push({
+              id: `msg-${Date.now()}-${sub.id}`,
+              conversation_id: convId,
+              sender_type: "agent",
+              content_type: "text",
+              content_text: msgText,
+              created_at: now.toISOString(),
+              status: "delivered",
+            });
+          }
+        } else if (daysRemaining < 0) {
+          // Grace period check
+          const graceDaysRemaining = demoGracePeriodDays + daysRemaining;
+          if (graceDaysRemaining < 0 && sub.subscription_status !== "suspended") {
+            sub.subscription_status = "suspended";
+            sub.last_reminder_sent_at = now.toISOString();
+            results.push({
+              accountId: sub.id,
+              accountName: sub.name,
+              daysRemaining,
+              action: `Suspended account after grace period of ${demoGracePeriodDays} days elapsed`,
+              phone: sub.billing_phone,
+              status: "suspended_demo",
+            });
+          } else if (graceDaysRemaining >= 0 && sub.subscription_status !== "past_due") {
+            sub.subscription_status = "past_due";
+            sub.last_reminder_sent_at = now.toISOString();
+            sub.reminder_count = (sub.reminder_count || 0) + 1;
+            results.push({
+              accountId: sub.id,
+              accountName: sub.name,
+              daysRemaining,
+              action: `Marked past_due (in grace period: ${graceDaysRemaining}d remaining)`,
+              phone: sub.billing_phone,
+              status: "past_due_demo",
+            });
+          }
         }
       }
 
@@ -157,7 +182,7 @@ async function handleCronReminders(request: Request) {
     // Production logic with Supabase
     const supabase = await createClient();
 
-    // 1. Fetch platform settings
+    // 1. Fetch platform settings including default 15-day reminder milestones and grace period
     const { data: settings } = await supabase
       .from("platform_billing_settings")
       .select("*")
@@ -166,6 +191,8 @@ async function handleCronReminders(request: Request) {
 
     const template = settings?.reminder_message_template || MOCK_PLATFORM_SETTINGS.reminder_message_template;
     const defaultPayLink = settings?.default_payment_link || "";
+    const reminderMilestones: number[] = settings?.default_reminder_days || [15, 7, 3, 1, 0];
+    const gracePeriodDays: number = settings?.default_grace_period_days ?? 3;
 
     // 2. Fetch connected Super Admin WhatsApp config
     const { data: whatsappConfigs } = await supabase
@@ -192,17 +219,56 @@ async function handleCronReminders(request: Request) {
       const diffMs = expiry.getTime() - now.getTime();
       const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-      // Skip if reminded within last 24 hours
-      if (acc.last_reminder_sent_at) {
-        const lastSent = new Date(acc.last_reminder_sent_at);
-        if (now.getTime() - lastSent.getTime() < 24 * 3600 * 1000) {
+      // Match closest due reminder milestone (e.g. 15, 7, 3, 1, 0)
+      const matchedMilestone = reminderMilestones
+        .slice()
+        .sort((a, b) => b - a)
+        .find((m) => daysRemaining <= m && daysRemaining >= m - 1 && daysRemaining >= 0);
+
+      // Check grace period & suspension rules
+      if (daysRemaining < 0) {
+        const daysPastExpiry = Math.abs(daysRemaining);
+        if (daysPastExpiry > gracePeriodDays && acc.subscription_status !== "suspended") {
+          // Suspend account after grace period
+          await supabase
+            .from("accounts")
+            .update({ subscription_status: "suspended", updated_at: now.toISOString() })
+            .eq("id", acc.id);
+
+          results.push({
+            accountId: acc.id,
+            accountName: acc.name,
+            daysRemaining,
+            action: `Suspended account after grace period of ${gracePeriodDays} days exceeded`,
+            status: "suspended",
+          });
           continue;
+        } else if (acc.subscription_status === "active") {
+          // Grace period active: set past_due
+          await supabase
+            .from("accounts")
+            .update({ subscription_status: "past_due", updated_at: now.toISOString() })
+            .eq("id", acc.id);
         }
       }
 
-      // Check if due within 3 days or expired
-      const shouldRemind = daysRemaining <= 3;
-      if (!shouldRemind) continue;
+      if (matchedMilestone === undefined) {
+        continue;
+      }
+
+      // Check reminder_delivery_logs for deduplication (only one reminder per account per milestone per day)
+      const { data: existingLog } = await supabase
+        .from("reminder_delivery_logs")
+        .select("id")
+        .eq("account_id", acc.id)
+        .eq("milestone_days", matchedMilestone)
+        .eq("sent_date", todayStr)
+        .maybeSingle();
+
+      if (existingLog) {
+        // Already sent today for this milestone, skip to prevent duplicates
+        continue;
+      }
 
       const owner = Array.isArray(acc.profiles)
         ? acc.profiles.find((p: any) => p.role === "owner") || acc.profiles[0]
@@ -220,7 +286,7 @@ async function handleCronReminders(request: Request) {
         .replace(/{{name}}/g, owner?.full_name || "Customer")
         .replace(/{{account_name}}/g, acc.name)
         .replace(/{{due_date}}/g, dueDateStr)
-        .replace(/{{amount}}/g, `${acc.currency || "USD"} ${acc.monthly_price || 49}`)
+        .replace(/{{amount}}/g, `${acc.currency || "INR"} ${acc.monthly_price || 999}`)
         .replace(/{{payment_link}}/g, payLink);
 
       let sendStatus = "skipped_no_phone";
@@ -327,16 +393,20 @@ async function handleCronReminders(request: Request) {
         }
       }
 
-      // If expired beyond 2 days grace period, mark past_due
-      let newStatus = acc.subscription_status;
-      if (daysRemaining < 0 && acc.subscription_status === "active") {
-        newStatus = "past_due";
-      }
+      // Record in reminder_delivery_logs for deduplication
+      await supabase.from("reminder_delivery_logs").insert({
+        account_id: acc.id,
+        milestone_days: matchedMilestone,
+        channel: "whatsapp",
+        recipient: recipientPhone || "unconfigured",
+        status: sendStatus.startsWith("failed") ? "failed" : sendStatus === "delivered" ? "delivered" : "sent",
+        provider_ref: `cron_${Date.now()}`,
+        sent_date: todayStr,
+      });
 
       await supabase
         .from("accounts")
         .update({
-          subscription_status: newStatus,
           last_reminder_sent_at: now.toISOString(),
           reminder_count: (acc.reminder_count || 0) + 1,
         })
@@ -346,7 +416,7 @@ async function handleCronReminders(request: Request) {
         accountId: acc.id,
         accountName: acc.name,
         daysRemaining,
-        action: daysRemaining >= 0 ? `Sent reminder (${daysRemaining}d left)` : "Sent past-due notice",
+        action: `Sent ${matchedMilestone}-day renewal reminder (${daysRemaining}d left)`,
         phone: recipientPhone,
         status: sendStatus,
       });

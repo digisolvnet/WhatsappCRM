@@ -73,7 +73,7 @@ export async function middleware(request: NextRequest) {
   // Support Demo Mode when testing locally without external Supabase credentials
   const isDemo = request.cookies.get('wacrm_demo')?.value === 'true' || process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/flows', '/agents', '/notifications', '/settings', '/admin']
+  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/catalogue', '/orders', '/pipelines', '/broadcasts', '/automations', '/flows', '/agents', '/notifications', '/settings', '/admin']
   if (!user && !isDemo && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

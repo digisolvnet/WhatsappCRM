@@ -43,12 +43,12 @@ export async function POST(
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { status?: 'draft' | 'active' | 'archived' }
+    | { status?: 'draft' | 'active' | 'paused' | 'archived' }
     | null
   const status = body?.status
-  if (!status || !['draft', 'active', 'archived'].includes(status)) {
+  if (!status || !['draft', 'active', 'paused', 'archived'].includes(status)) {
     return NextResponse.json(
-      { error: "status must be one of 'draft' | 'active' | 'archived'" },
+      { error: "status must be one of 'draft' | 'active' | 'paused' | 'archived'" },
       { status: 400 },
     )
   }
